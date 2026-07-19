@@ -1,0 +1,65 @@
+import type { KnowledgeDomain } from "../types";
+
+export const chartPatterns: KnowledgeDomain = {
+  id: "chart-patterns",
+  title: "Chart Patterns",
+  summary: "Canonical multi-bar formations used to frame continuation and reversal setups.",
+  entries: [
+    {
+      id: "head-and-shoulders",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Head and Shoulders",
+      summary: "Reversal pattern with three peaks; middle peak highest, neckline break confirms.",
+      tags: ["reversal"],
+    },
+    {
+      id: "double-top-bottom",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Double Top / Double Bottom",
+      summary: "Two failed attempts at a level, followed by structure break.",
+      tags: ["reversal"],
+    },
+    {
+      id: "triangle",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Triangles",
+      summary: "Ascending, descending, and symmetrical consolidations preceding continuation or reversal.",
+      tags: ["consolidation"],
+    },
+    {
+      id: "flag-pennant",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Flag / Pennant",
+      summary: "Short, sharp continuation patterns following an impulsive move (the pole).",
+      tags: ["continuation"],
+    },
+    {
+      id: "cup-and-handle",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Cup and Handle",
+      summary: "Rounded base with a short pullback (handle) preceding breakout.",
+      tags: ["continuation"],
+    },
+    {
+      id: "wedge",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Rising / Falling Wedge",
+      summary: "Converging trendlines biased against the prior move; often reversal.",
+      tags: ["reversal", "wedge"],
+    },
+    {
+      id: "vcp",
+      domain: "chart-patterns",
+      category: "pattern",
+      title: "Volatility Contraction Pattern (VCP)",
+      summary: "Successive shallower pullbacks with declining volume before breakout.",
+      tags: ["contraction", "breakout"],
+    },
+  ],
+};
