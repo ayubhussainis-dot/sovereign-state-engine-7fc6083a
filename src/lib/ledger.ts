@@ -18,7 +18,7 @@ export type LedgerEntry =
       riskAuthorityValidated: true;
     };
 
-const entries: ReadonlyArray<LedgerEntry> extends infer _ ? LedgerEntry[] : never = [];
+const entries: LedgerEntry[] = [];
 
 export function appendLedger(entry: LedgerEntry): void {
   Object.freeze(entry);
