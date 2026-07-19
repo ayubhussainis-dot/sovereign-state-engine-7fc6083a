@@ -1,11 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { RihalDashboard } from "@/components/RihalDashboard";
-import {
-  SDTStateEngine,
-  type SDTState,
-  type TelemetryData,
-} from "@/lib/SDTStateEngine";
+import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -32,6 +28,7 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   const [state, setState] = useState<SDTState>("G0_HOMEOSTASIS");
+  const [standby, setStandby] = useState(true);
   const [telemetry, setTelemetry] = useState<TelemetryData>({
     currentPrice: 100,
     currentOfi: 0,
@@ -40,38 +37,61 @@ function Index() {
   });
   const [zScore, setZScore] = useState(0);
   const [sMultiplier, setSMultiplier] = useState(0);
-  const engineRef = useRef<SDTStateEngine | null>(null);
+  const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
-    const engine = new SDTStateEngine(
-      {
+    const worker = new Worker(
+      new URL("../workers/sdt.worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    workerRef.current = worker;
+
+    worker.postMessage({
+      type: "INIT",
+      risk: {
         equityHighWaterMark: 100000,
-        currentEquity: 99500,
+        currentEquity: 100000,
         baseLeverage: 2,
         zScoreThreshold: 2.5,
       },
-      (_old, next) => setState(next),
-    );
-    engineRef.current = engine;
+    });
 
-    let price = 100;
-    const id = window.setInterval(() => {
-      const shock = Math.random() < 0.02 ? (Math.random() - 0.5) * 4 : 0;
-      price = price + (Math.random() - 0.5) * 0.2 + shock;
-      const t: TelemetryData = {
-        currentPrice: price,
-        currentOfi: (Math.random() - 0.5) * 2000,
-        liquidityDepth: 4000 + Math.random() * 3000,
-        volatility: 0.01 + Math.random() * 0.05,
-      };
-      engine.step(t);
-      setTelemetry(t);
-      setZScore(engine.getLastZScore());
-      setSMultiplier(engine.getLastMultiplier());
-    }, 50);
+    worker.addEventListener("message", (ev: MessageEvent) => {
+      const msg = ev.data;
+      if (msg.type === "TRANSITION") {
+        setState(msg.to);
+      } else if (msg.type === "STATE") {
+        setState(msg.state);
+        setTelemetry(msg.telemetry);
+        setZScore(msg.zScore);
+        setSMultiplier(msg.sMultiplier);
+      }
+    });
 
-    return () => window.clearInterval(id);
-  }, []);
+    let id = 0;
+    if (!standby) {
+      let price = 100;
+      // 400 Hz AFC telemetry ingestion (2.5ms cadence)
+      id = window.setInterval(() => {
+        const shock = Math.random() < 0.02 ? (Math.random() - 0.5) * 4 : 0;
+        price = price + (Math.random() - 0.5) * 0.2 + shock;
+        const t: TelemetryData = {
+          currentPrice: price,
+          currentOfi: (Math.random() - 0.5) * 2000,
+          liquidityDepth: 4000 + Math.random() * 3000,
+          volatility: 0.01 + Math.random() * 0.05,
+        };
+        worker.postMessage({ type: "TELEMETRY", telemetry: t });
+      }, 2.5);
+    }
+
+    return () => {
+      if (id) window.clearInterval(id);
+      worker.terminate();
+    };
+  }, [standby]);
+
+  const isDev = import.meta.env.DEV;
 
   return (
     <main className="min-h-screen bg-black flex flex-col items-center justify-center gap-4 p-4">
@@ -84,26 +104,46 @@ function Index() {
       <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
         <button
           type="button"
-          onClick={() => engineRef.current?.injectShock()}
-          className="px-3 py-2 border border-emerald-900 text-emerald-400 hover:bg-emerald-950/40 transition-colors"
+          onClick={() => setStandby((s) => !s)}
+          className={`px-3 py-2 border transition-colors ${
+            standby
+              ? "border-amber-900 text-amber-400 hover:bg-amber-950/40"
+              : "border-zinc-800 text-zinc-400 hover:bg-zinc-900"
+          }`}
         >
-          INJECT SHOCK [Z &gt; 2.5]
+          {standby ? "ENGAGE SIMULATED FEED" : "RETURN TO STANDBY"}
         </button>
-        <button
-          type="button"
-          onClick={() => engineRef.current?.forceDrawdown()}
-          className="px-3 py-2 border border-red-900 text-red-400 hover:bg-red-950/40 transition-colors"
-        >
-          FORCE DRAWDOWN [p53 ARREST]
-        </button>
-        <button
-          type="button"
-          onClick={() => engineRef.current?.resetEquity()}
-          className="px-3 py-2 border border-zinc-800 text-zinc-400 hover:bg-zinc-900 transition-colors"
-        >
-          RESET → G0
-        </button>
+        {isDev && (
+          <>
+            <button
+              type="button"
+              onClick={() => workerRef.current?.postMessage({ type: "SHOCK" })}
+              className="px-3 py-2 border border-emerald-900 text-emerald-400 hover:bg-emerald-950/40 transition-colors"
+            >
+              INJECT SHOCK [Z &gt; 2.5]
+            </button>
+            <button
+              type="button"
+              onClick={() => workerRef.current?.postMessage({ type: "DRAWDOWN" })}
+              className="px-3 py-2 border border-red-900 text-red-400 hover:bg-red-950/40 transition-colors"
+            >
+              FORCE DRAWDOWN [p53 ARREST]
+            </button>
+            <button
+              type="button"
+              onClick={() => workerRef.current?.postMessage({ type: "RESET" })}
+              className="px-3 py-2 border border-zinc-800 text-zinc-400 hover:bg-zinc-900 transition-colors"
+            >
+              RESET → G0
+            </button>
+          </>
+        )}
       </div>
+      {standby && (
+        <div className="font-mono text-[10px] tracking-widest text-amber-500/80">
+          SYSTEM STANDBY — AWAITING SECURE DATA FEED
+        </div>
+      )}
     </main>
   );
 }
