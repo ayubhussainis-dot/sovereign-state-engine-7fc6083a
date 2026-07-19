@@ -154,4 +154,30 @@ export class SDTStateEngine {
   public reset(): void {
     this.transitionTo("G0_HOMEOSTASIS");
   }
+
+  public forceDrawdown(): void {
+    this.riskProfile.currentEquity =
+      this.riskProfile.equityHighWaterMark * 0.94;
+  }
+
+  public injectShock(): void {
+    const base =
+      this.priceHistory.length > 0
+        ? this.priceHistory[this.priceHistory.length - 1]
+        : 100;
+    for (let i = 0; i < 5; i++) {
+      this.priceHistory.push(base + 15 + i);
+    }
+    if (this.priceHistory.length > this.rollingWindowSize * 2) {
+      this.priceHistory = this.priceHistory.slice(-this.rollingWindowSize * 2);
+    }
+  }
+
+  public resetEquity(): void {
+    this.riskProfile.currentEquity = this.riskProfile.equityHighWaterMark;
+    if (this.currentState === "P53_ARREST") {
+      this.currentState = "G0_HOMEOSTASIS";
+      this.transitionTo("G0_HOMEOSTASIS");
+    }
+  }
 }
