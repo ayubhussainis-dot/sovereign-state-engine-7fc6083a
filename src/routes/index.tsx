@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { RihalDashboard } from "@/components/RihalDashboard";
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
+import type { Decision } from "@/engine/decision/types";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -37,6 +38,7 @@ function Index() {
   });
   const [zScore, setZScore] = useState(0);
   const [sMultiplier, setSMultiplier] = useState(0);
+  const [decision, setDecision] = useState<Decision | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
@@ -65,6 +67,8 @@ function Index() {
         setTelemetry(msg.telemetry);
         setZScore(msg.zScore);
         setSMultiplier(msg.sMultiplier);
+      } else if (msg.type === "DECISION") {
+        setDecision(msg.decision as Decision);
       }
     });
 
@@ -142,6 +146,33 @@ function Index() {
       {standby && (
         <div className="font-mono text-[10px] tracking-widest text-amber-500/80">
           SYSTEM STANDBY — AWAITING SECURE DATA FEED
+        </div>
+      )}
+      {!standby && decision && (
+        <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest text-zinc-400 flex flex-wrap gap-x-6 gap-y-1">
+          <span>
+            KERNEL BIAS:{" "}
+            <span
+              className={
+                decision.bias === "long"
+                  ? "text-emerald-400"
+                  : decision.bias === "short"
+                    ? "text-red-400"
+                    : "text-zinc-500"
+              }
+            >
+              {decision.bias.toUpperCase()}
+            </span>
+          </span>
+          <span>CONFIDENCE: {(decision.confidence * 100).toFixed(1)}%</span>
+          <span>SCORE: {decision.score.toFixed(3)}</span>
+          <span>SIGNALS: {decision.signals.length}</span>
+          {decision.plan && (
+            <span>
+              PLAN E:{decision.plan.entry.toFixed(2)} S:
+              {decision.plan.stop.toFixed(2)} RR:{decision.plan.rr.toFixed(2)}
+            </span>
+          )}
         </div>
       )}
     </main>
