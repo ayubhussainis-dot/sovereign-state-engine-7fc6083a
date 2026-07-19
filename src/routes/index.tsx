@@ -74,13 +74,36 @@ function Index() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-black flex items-center justify-center p-4">
+    <main className="min-h-screen bg-black flex flex-col items-center justify-center gap-4 p-4">
       <RihalDashboard
         currentState={state}
         telemetry={telemetry}
         zScore={zScore}
         sMultiplier={sMultiplier}
       />
+      <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
+        <button
+          type="button"
+          onClick={() => engineRef.current?.injectShock()}
+          className="px-3 py-2 border border-emerald-900 text-emerald-400 hover:bg-emerald-950/40 transition-colors"
+        >
+          INJECT SHOCK [Z &gt; 2.5]
+        </button>
+        <button
+          type="button"
+          onClick={() => engineRef.current?.forceDrawdown()}
+          className="px-3 py-2 border border-red-900 text-red-400 hover:bg-red-950/40 transition-colors"
+        >
+          FORCE DRAWDOWN [p53 ARREST]
+        </button>
+        <button
+          type="button"
+          onClick={() => engineRef.current?.resetEquity()}
+          className="px-3 py-2 border border-zinc-800 text-zinc-400 hover:bg-zinc-900 transition-colors"
+        >
+          RESET → G0
+        </button>
+      </div>
     </main>
   );
 }
