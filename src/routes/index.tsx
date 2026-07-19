@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { RihalDashboard } from "@/components/RihalDashboard";
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 import type { Decision } from "@/engine/decision/types";
+import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -40,6 +41,31 @@ function Index() {
   const [sMultiplier, setSMultiplier] = useState(0);
   const [decision, setDecision] = useState<Decision | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  const [futures, setFutures] = useState<FuturesTelemetrySnapshot | null>(null);
+  const [futuresError, setFuturesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const snap = await getFuturesTelemetry({ data: { symbol: "BTCUSDT" } });
+        if (!cancelled) {
+          setFutures(snap);
+          setFuturesError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setFuturesError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     const worker = new Worker(
@@ -105,6 +131,32 @@ function Index() {
         zScore={zScore}
         sMultiplier={sMultiplier}
       />
+      <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest flex flex-wrap gap-x-6 gap-y-1">
+        <span className="text-zinc-500">BINANCE FUTURES TESTNET · BTCUSDT</span>
+        {futures ? (
+          <>
+            <span className="text-zinc-400">
+              LAST: <span className="text-emerald-400">{futures.lastPrice.toFixed(2)}</span>
+            </span>
+            <span className="text-zinc-400">
+              MARK: <span className="text-emerald-400">{futures.markPrice.toFixed(2)}</span>
+            </span>
+            <span className="text-zinc-400">
+              WALLET: <span className="text-zinc-200">{futures.totalWalletBalance.toFixed(2)}</span>
+            </span>
+            <span className="text-zinc-400">
+              MARGIN: <span className="text-zinc-200">{futures.totalMarginBalance.toFixed(2)}</span>
+            </span>
+            <span className="text-zinc-600">
+              TS {new Date(futures.ts).toISOString().slice(11, 19)}Z
+            </span>
+          </>
+        ) : futuresError ? (
+          <span className="text-red-400">FEED ERROR: {futuresError}</span>
+        ) : (
+          <span className="text-amber-400">CONNECTING…</span>
+        )}
+      </div>
       <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
         <button
           type="button"
