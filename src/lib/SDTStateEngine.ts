@@ -175,9 +175,6 @@ export class SDTStateEngine {
 
   public resetEquity(): void {
     this.riskProfile.currentEquity = this.riskProfile.equityHighWaterMark;
-    if (this.currentState === "P53_ARREST") {
-      this.currentState = "G0_HOMEOSTASIS";
-      this.transitionTo("G0_HOMEOSTASIS");
-    }
+    this.transitionTo("G0_HOMEOSTASIS");
   }
 }
