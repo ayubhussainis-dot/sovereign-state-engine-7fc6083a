@@ -53,6 +53,7 @@ function Index() {
   const [cycle, setCycle] = useState<HarnessCycle | null>(null);
 
   useEffect(() => {
+    if (mode === "STANDBY") return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -73,7 +74,7 @@ function Index() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [mode]);
 
   // PAPER_TESTNET: pipe live WS ticks through the MDT → PPG → SOALL pipeline.
   useEffect(() => {
