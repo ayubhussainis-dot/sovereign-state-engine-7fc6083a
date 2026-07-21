@@ -15,7 +15,9 @@ export type WaveState =
   | "UNSPECIFIED"
   | "COMPRESSED"
   | "NEUTRAL"
-  | "EXPANDED";
+  | "EXPANDED"
+  | "NODAL_ZERO"
+  | "ANTINODE_PEAK";
 
 export interface VolatilityReading {
   /** \mathcal{V} — TODO(spec): bounded price dispersion. */
