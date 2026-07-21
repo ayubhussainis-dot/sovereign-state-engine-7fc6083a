@@ -24,9 +24,11 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
       <div className="flex justify-between items-center border-b border-zinc-800 pb-4 mb-6">
         <div>
           <h1 className="text-xl tracking-widest font-bold text-zinc-100">
-            SOVEREIGN DETERMINISTIC TERMINAL
+            J.O.ALL — JACK OF ALL
           </h1>
-          <p className="text-xs text-zinc-500">PRECISION RECALIBRATION PROTOCOL GAUGE</p>
+          <p className="text-xs text-zinc-500">
+            MARKET DIGITAL TWIN · PPG · SOALL 8-GATE GOVERNANCE
+          </p>
         </div>
         <div className="text-right">
           <span className="text-xs text-zinc-500 block">SYSTEM STATUS STATE</span>
@@ -169,7 +171,7 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
       </div>
 
       <footer className="mt-6 pt-4 border-t border-zinc-900 text-[10px] text-zinc-600 text-center tracking-widest">
-        DESIGN PRINCIPAL — AYUB ABDUL HUSSAIN
+        SYSTEMS ARCHITECT — AYUB ABDUL HUSSAIN · AYUBHUSSAINOID
       </footer>
     </div>
   );
