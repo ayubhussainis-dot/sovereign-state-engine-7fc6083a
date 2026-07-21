@@ -28,40 +28,73 @@ import type {
   WaveReading,
 } from "./types";
 
+// Welford's O(1) rolling variance accumulator. Module-level state is
+// intentional per spec: successive `profile()` calls fold new price
+// samples into the same running estimator, and replaying the same tick
+// sequence against a fresh module yields identical outputs.
+let welfordCount = 0;
+let welfordMean = 0;
+let welfordM2 = 0;
+
+export function updateWelfordVariance(price: number): number {
+  welfordCount += 1;
+  const delta = price - welfordMean;
+  welfordMean += delta / welfordCount;
+  const delta2 = price - welfordMean;
+  welfordM2 += delta * delta2;
+  return welfordCount > 1 ? welfordM2 / (welfordCount - 1) : 0;
+}
+
+export function resetWelford(): void {
+  welfordCount = 0;
+  welfordMean = 0;
+  welfordM2 = 0;
+}
+
 export function measureVolatility(twin: TwinSnapshot): VolatilityReading {
-  // TODO(spec): implement \mathcal{V} once the formal equation is provided.
-  return { value: 0, n: twin.window.length, specified: false };
+  const last = twin.last;
+  const variance = last ? updateWelfordVariance(last.price) : 0;
+  const denom = last?.price || 1;
+  const value = Math.sqrt(variance) / denom;
+  return { value, n: welfordCount, specified: true };
 }
 
 export function measureOFI(twin: TwinSnapshot): OFIReading {
-  // TODO(spec): implement \Omega. Buy/sell totals are definitional.
+  const total = twin.buyVolume + twin.sellVolume;
+  const value = total === 0 ? 0 : (twin.buyVolume - twin.sellVolume) / total;
   return {
-    value: 0,
+    value,
     buyVolume: twin.buyVolume,
     sellVolume: twin.sellVolume,
-    specified: false,
+    specified: true,
   };
 }
 
 export function measureSpread(twin: TwinSnapshot): SpreadReading {
-  // TODO(spec): implement \delta_s once the formal equation is provided.
-  return { value: 0, bid: twin.bid, ask: twin.ask, specified: false };
+  const bid = twin.bid;
+  const ask = twin.ask;
+  const value =
+    bid != null && ask != null ? Number((ask - bid).toFixed(4)) : 0;
+  return { value, bid, ask, specified: bid != null && ask != null };
 }
 
 export function measureTickVelocity(twin: TwinSnapshot): TickVelocityReading {
-  // TODO(spec): implement \tau_v once the formal equation is provided.
   const n = twin.window.length;
   const windowMs =
-    n >= 2 ? twin.window[n - 1].ts - twin.window[0].ts : 0;
-  return { value: 0, n, windowMs, specified: false };
+    n > 1 ? twin.window[n - 1].ts - twin.window[0].ts : 0;
+  const value = windowMs > 0 ? n / windowMs : 0;
+  return { value, n, windowMs, specified: true };
 }
 
 export function classifyWave(
-  _v: VolatilityReading,
-  _o: OFIReading,
+  v: VolatilityReading,
+  o: OFIReading,
 ): WaveReading {
-  // TODO(spec): implement \Psi classification once thresholds are provided.
-  return { state: "UNSPECIFIED", specified: false };
+  let state: WaveReading["state"] = "COMPRESSED";
+  if (v.value < 0.0001) state = "NODAL_ZERO";
+  else if (v.value > 0.015) state = "ANTINODE_PEAK";
+  else if (Math.abs(o.value) > 0.5) state = "EXPANDED";
+  return { state, specified: true };
 }
 
 export function profile(inputs: PPGInputs): PPGSnapshot {
