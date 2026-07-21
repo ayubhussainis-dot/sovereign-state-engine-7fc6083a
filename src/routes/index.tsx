@@ -1,26 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RihalDashboard } from "@/components/RihalDashboard";
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useBinanceTrade } from "@/hooks/use-binance-feed";
+import { PaperHarness, type HarnessCycle } from "@/twin/paper-harness";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Sovereign Deterministic Terminal" },
+      { title: "J.O.ALL — Jack of All" },
       {
         name: "description",
         content:
-          "SDT — deterministic G0→G1→S→M state engine with p53 checkpoint governance and Rihal interlocking telemetry.",
+          "J.O.ALL paper trading terminal — Market Digital Twin, PPG telemetry, and SOALL 8-gate governance over Binance Futures Testnet.",
       },
-      { name: "author", content: "Ayub Abdul Hussain" },
-      { property: "og:title", content: "Sovereign Deterministic Terminal" },
+      { name: "author", content: "Ayub Abdul Hussain — AYUBHUSSAINOID" },
+      { property: "og:title", content: "J.O.ALL — Jack of All" },
       {
         property: "og:description",
         content:
-          "Deterministic cell-cycle state engine with p53 checkpoint governance.",
+          "Deterministic Market Digital Twin with p53 checkpoint governance and SOALL 8-gate audit pipeline.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -29,9 +30,12 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+type Mode = "STANDBY" | "SIMULATED" | "PAPER_TESTNET";
+
 function Index() {
   const [state, setState] = useState<SDTState>("G0_HOMEOSTASIS");
-  const [standby, setStandby] = useState(true);
+  const [mode, setMode] = useState<Mode>("STANDBY");
+  const standby = mode === "STANDBY";
   const [telemetry, setTelemetry] = useState<TelemetryData>({
     currentPrice: 100,
     currentOfi: 0,
@@ -45,6 +49,8 @@ function Index() {
   const [futures, setFutures] = useState<FuturesTelemetrySnapshot | null>(null);
   const [futuresError, setFuturesError] = useState<string | null>(null);
   const wsTrade = useBinanceTrade("BTCUSDT");
+  const harness = useMemo(() => new PaperHarness(), []);
+  const [cycle, setCycle] = useState<HarnessCycle | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +74,25 @@ function Index() {
       window.clearInterval(id);
     };
   }, []);
+
+  // PAPER_TESTNET: pipe live WS ticks through the MDT → PPG → SOALL pipeline.
+  useEffect(() => {
+    if (mode !== "PAPER_TESTNET") return;
+    if (wsTrade.lastPrice == null || wsTrade.lastTs == null) return;
+    const c = harness.ingest({
+      price: wsTrade.lastPrice,
+      volume: 0,
+      ts: wsTrade.lastTs,
+      receivedAt: Date.now(),
+      bid: futures?.markPrice ?? undefined,
+      ask: futures?.markPrice ?? undefined,
+    });
+    setCycle(c);
+  }, [mode, harness, wsTrade.lastPrice, wsTrade.lastTs, futures?.markPrice]);
+
+  useEffect(() => {
+    if (mode === "STANDBY") harness.reset();
+  }, [mode, harness]);
 
   useEffect(() => {
     const worker = new Worker(
@@ -101,7 +126,7 @@ function Index() {
     });
 
     let id = 0;
-    if (!standby) {
+    if (mode === "SIMULATED") {
       let price = 100;
       // 400 Hz AFC telemetry ingestion (2.5ms cadence)
       id = window.setInterval(() => {
@@ -121,7 +146,7 @@ function Index() {
       if (id) window.clearInterval(id);
       worker.terminate();
     };
-  }, [standby]);
+  }, [mode]);
 
   const isDev = import.meta.env.DEV;
 
@@ -181,17 +206,27 @@ function Index() {
         )}
       </div>
       <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
-        <button
-          type="button"
-          onClick={() => setStandby((s) => !s)}
-          className={`px-3 py-2 border transition-colors ${
-            standby
-              ? "border-amber-900 text-amber-400 hover:bg-amber-950/40"
-              : "border-zinc-800 text-zinc-400 hover:bg-zinc-900"
-          }`}
-        >
-          {standby ? "ENGAGE SIMULATED FEED" : "RETURN TO STANDBY"}
-        </button>
+        {(["STANDBY", "SIMULATED", "PAPER_TESTNET"] as const).map((m) => {
+          const active = mode === m;
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`px-3 py-2 border transition-colors ${
+                active
+                  ? m === "PAPER_TESTNET"
+                    ? "border-emerald-700 text-emerald-300 bg-emerald-950/40"
+                    : m === "SIMULATED"
+                      ? "border-zinc-600 text-zinc-100 bg-zinc-900"
+                      : "border-amber-800 text-amber-300 bg-amber-950/40"
+                  : "border-zinc-800 text-zinc-500 hover:bg-zinc-900"
+              }`}
+            >
+              {m === "PAPER_TESTNET" ? "PAPER TRADING · TESTNET" : m.replace("_", " ")}
+            </button>
+          );
+        })}
         {isDev && (
           <>
             <button
@@ -220,7 +255,51 @@ function Index() {
       </div>
       {standby && (
         <div className="font-mono text-[10px] tracking-widest text-amber-500/80">
-          SYSTEM STANDBY — AWAITING SECURE DATA FEED
+          SYSTEM STANDBY — SELECT FEED MODE ABOVE
+        </div>
+      )}
+      {mode === "PAPER_TESTNET" && cycle && (
+        <div className="w-full max-w-4xl border border-emerald-900/60 p-3 font-mono text-[10px] tracking-widest text-zinc-400 space-y-2">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span className="text-emerald-400">MDT · PAPER PIPELINE</span>
+            <span>TWIN SEQ: {cycle.twin.last?.twinSeq ?? "—"}</span>
+            <span>WINDOW: {cycle.twin.window.length}</span>
+            <span>V: {cycle.ppg.volatility.value.toExponential(2)}</span>
+            <span>Ω: {cycle.ppg.ofi.value.toFixed(3)}</span>
+            <span>τ: {cycle.ppg.velocity.value.toFixed(4)}/ms</span>
+            <span>Ψ: {cycle.ppg.wave.state}</span>
+            <span>
+              LEDGER HEAD:{" "}
+              <span className="text-zinc-200">{harness.ledger.head()}</span>
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {cycle.report.outcomes.map((o) => (
+              <span
+                key={o.gate}
+                className={`px-2 py-1 border ${
+                  o.passed
+                    ? "border-emerald-900 text-emerald-400"
+                    : "border-red-900 text-red-400"
+                }`}
+                title={o.reason}
+              >
+                {o.gate.replace("_", " ")} {o.passed ? "✓" : "✗"}
+              </span>
+            ))}
+          </div>
+          <div>
+            AUTHORITY:{" "}
+            {cycle.report.allPassed ? (
+              <span className="text-emerald-400">
+                GRANTED · ORDER_INTENT logged (paper — no execution)
+              </span>
+            ) : (
+              <span className="text-red-400">
+                VETO at {cycle.report.failedAt}
+              </span>
+            )}
+          </div>
         </div>
       )}
       {!standby && decision && (
