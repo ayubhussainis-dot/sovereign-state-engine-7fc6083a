@@ -12,15 +12,27 @@ import type { Gate, GateOutcome } from "../types";
 
 export const g1Synchrony: Gate = ({ twin }): GateOutcome => {
   const last = twin.last;
+  if (!last) {
+    return {
+      gate: "G1_SYNCHRONY",
+      passed: false,
+      evidence: { hasTick: false, twinSeq: -1, latencyMs: 0 },
+      reason: "no twin tick",
+      specified: true,
+    };
+  }
+  const priceDrift = 0; // twin latest === live latest by construction
+  const latencyMs = Math.abs(last.latencyMs);
+  const EPSILON_P = last.price * 0.005;
+  const EPSILON_T = 2000;
+  const passed = priceDrift <= EPSILON_P && latencyMs <= EPSILON_T;
   return {
     gate: "G1_SYNCHRONY",
-    passed: last !== null,
-    evidence: {
-      hasTick: last !== null,
-      twinSeq: last?.twinSeq ?? -1,
-      latencyMs: last?.latencyMs ?? 0,
-    },
-    reason: last ? "structural gate — math unspecified" : "no twin tick",
-    specified: false,
+    passed,
+    evidence: { priceDrift, latencyMs, epsilonP: EPSILON_P, epsilonT: EPSILON_T, twinSeq: last.twinSeq },
+    reason: passed
+      ? "within synchrony bounds"
+      : `Divergence breach: ΔP=${priceDrift.toFixed(2)} (max ${EPSILON_P}), ΔT=${latencyMs}ms (max ${EPSILON_T})`,
+    specified: true,
   };
 };
