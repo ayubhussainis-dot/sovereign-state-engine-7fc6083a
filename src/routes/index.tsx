@@ -34,7 +34,7 @@ type Mode = "STANDBY" | "SIMULATED" | "PAPER_TESTNET";
 
 function Index() {
   const [state, setState] = useState<SDTState>("G0_HOMEOSTASIS");
-  const [mode, setMode] = useState<Mode>("STANDBY");
+  const [mode, setMode] = useState<Mode>("PAPER_TESTNET");
   const standby = mode === "STANDBY";
   const [telemetry, setTelemetry] = useState<TelemetryData>({
     currentPrice: 100,
