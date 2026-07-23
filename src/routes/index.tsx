@@ -6,6 +6,7 @@ import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useBinanceTrade } from "@/hooks/use-binance-feed";
 import { PaperHarness, type HarnessCycle } from "@/twin/paper-harness";
+import { useFusion } from "@/twin/fusion";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -51,6 +52,7 @@ function Index() {
   const wsTrade = useBinanceTrade("BTCUSDT");
   const harness = useMemo(() => new PaperHarness(), []);
   const [cycle, setCycle] = useState<HarnessCycle | null>(null);
+  const { fusion, frame: mirror } = useFusion(mode !== "STANDBY", 200);
 
   useEffect(() => {
     if (mode === "STANDBY") return;
@@ -85,11 +87,12 @@ function Index() {
       volume: 0,
       ts: wsTrade.lastTs,
       receivedAt: Date.now(),
-      bid: futures?.markPrice ?? undefined,
-      ask: futures?.markPrice ?? undefined,
+      bid: mirror.bid > 0 ? mirror.bid : futures?.markPrice ?? undefined,
+      ask: mirror.ask > 0 ? mirror.ask : futures?.markPrice ?? undefined,
+      side: fusion.verdict === "LOCKED-BULL" ? "buy" : fusion.verdict === "LOCKED-BEAR" ? "sell" : undefined,
     });
     setCycle(c);
-  }, [mode, harness, wsTrade.lastPrice, wsTrade.lastTs, futures?.markPrice]);
+  }, [mode, harness, wsTrade.lastPrice, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
 
   useEffect(() => {
     if (mode === "STANDBY") harness.reset();
@@ -257,6 +260,33 @@ function Index() {
       {standby && (
         <div className="font-mono text-[10px] tracking-widest text-amber-500/80">
           SYSTEM STANDBY — SELECT FEED MODE ABOVE
+        </div>
+      )}
+      {!standby && (
+        <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest space-y-1">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span className="text-zinc-500">N.O.T · TWO-WAY MIRROR</span>
+            <span className="text-zinc-500">WS {mirror.connected ? <span className="text-emerald-400">LIVE</span> : <span className="text-amber-400">CONNECTING</span>}</span>
+            <span className="text-zinc-400">SPREAD: <span className="text-zinc-200">{mirror.spreadBps.toFixed(2)} bps</span></span>
+            <span className="text-zinc-400">VEL: <span className="text-zinc-200">{mirror.velocityBps.toFixed(2)} bps/s</span></span>
+            <span className="text-zinc-400">FLOW: <span className="text-zinc-200">{mirror.orderFlow.toFixed(0)}</span></span>
+            <span className="text-zinc-400">FUND: <span className="text-zinc-200">{mirror.fundingBps.toFixed(3)} bps</span></span>
+          </div>
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span className="text-zinc-500">NOT (book) axis: <span className="text-zinc-300">{fusion.not.axis.toFixed(0)} bps</span> · conf {(fusion.not.confidence * 100).toFixed(0)}%</span>
+            <span className="text-zinc-500">TON (flow) axis: <span className="text-zinc-300">{fusion.ton.axis.toFixed(1)}%</span> · conf {(fusion.ton.confidence * 100).toFixed(0)}%</span>
+          </div>
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span className="text-zinc-400">CONSENSUS ↑ <span className="text-emerald-400">{(fusion.consensusBull * 100).toFixed(1)}%</span></span>
+            <span className="text-zinc-400">CONSENSUS ↓ <span className="text-red-400">{(fusion.consensusBear * 100).toFixed(1)}%</span></span>
+            <span className="text-zinc-400">AGREEMENT <span className="text-zinc-200">{(fusion.agreement * 100).toFixed(0)}%</span></span>
+            <span className="text-zinc-400">RESIDUAL <span className="text-amber-300">{(fusion.residual * 100).toFixed(1)}%</span> [{fusion.residualOwner}]</span>
+            <span className="text-zinc-400">VERDICT: <span className={
+              fusion.verdict === "LOCKED-BULL" ? "text-emerald-400" :
+              fusion.verdict === "LOCKED-BEAR" ? "text-red-400" :
+              fusion.verdict === "SPLIT" ? "text-amber-300" : "text-zinc-500"
+            }>{fusion.verdict}</span></span>
+          </div>
         </div>
       )}
       {mode === "PAPER_TESTNET" && cycle && (
