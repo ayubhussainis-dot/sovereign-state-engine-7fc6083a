@@ -89,18 +89,17 @@ export function fuse(not: LensReading, ton: LensReading): Fusion {
   return { not, ton, consensusBull, consensusBear, agreement, residual, residualOwner, verdict };
 }
 
-export function useFusion(active: boolean, intervalMs = 200): { fusion: Fusion; frame: MirrorFrame } {
+export function useFusion(intervalMs = 200): { fusion: Fusion; frame: MirrorFrame } {
   const [state, setState] = useState(() => {
     const f = binanceMirror.current;
     return { fusion: fuse(readNOT(f), readTON(f)), frame: f };
   });
   useEffect(() => {
-    if (!active) return;
     const id = setInterval(() => {
       const f = binanceMirror.current;
       setState({ fusion: fuse(readNOT(f), readTON(f)), frame: f });
     }, intervalMs);
     return () => clearInterval(id);
-  }, [active, intervalMs]);
+  }, [intervalMs]);
   return state;
 }

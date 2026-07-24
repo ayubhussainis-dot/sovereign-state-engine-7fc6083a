@@ -52,7 +52,7 @@ function Index() {
   const wsTrade = useBinanceTrade("BTCUSDT");
   const harness = useMemo(() => new PaperHarness(), []);
   const [cycle, setCycle] = useState<HarnessCycle | null>(null);
-  const { fusion, frame: mirror } = useFusion(mode !== "STANDBY", 200);
+  const { fusion, frame: mirror } = useFusion(200);
 
   useEffect(() => {
     if (mode === "STANDBY") return;
