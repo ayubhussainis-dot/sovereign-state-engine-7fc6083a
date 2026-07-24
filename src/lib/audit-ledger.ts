@@ -18,6 +18,8 @@ export type AuditKind =
   | "PPG_SNAPSHOT"
   | "GATE_REPORT"
   | "ORDER_INTENT"
+  | "ORDER_FILLED"
+  | "TRADE_CLOSED"
   | "AUTHORITY_VETO";
 
 export interface AuditEntry {
