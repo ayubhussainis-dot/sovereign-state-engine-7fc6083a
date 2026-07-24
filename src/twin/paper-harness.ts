@@ -23,12 +23,14 @@ import { AuditLedger, type AuditEntry } from "@/lib/audit-ledger";
 import type { RiskContext, GateReport } from "@/soall/types";
 import type { LiveTick, TwinSnapshot } from "./types";
 import type { PPGSnapshot } from "@/ppg/types";
+import { PaperBroker, type PaperStats, type Side } from "./paper-broker";
 
 export interface HarnessCycle {
   twin: TwinSnapshot;
   ppg: PPGSnapshot;
   report: GateReport;
   entries: AuditEntry[];
+  broker: PaperStats;
 }
 
 export interface HarnessTickInput {
@@ -39,11 +41,14 @@ export interface HarnessTickInput {
   bid?: number;
   ask?: number;
   side?: LiveTick["side"];
+  /** Directional intent from the fusion layer; drives paper entries. */
+  intent?: Side | "flat";
 }
 
 export class PaperHarness {
   private readonly market = new InternalMarket({ capacity: 4096 });
   readonly ledger = new AuditLedger(4096);
+  readonly broker = new PaperBroker();
   private risk: RiskContext = {
     drawdownFraction: 0,
     consecutiveLosses: 0,
@@ -88,15 +93,56 @@ export class PaperHarness {
       }),
     );
     entries.push(this.ledger.appendGateReport(tick.ts, report));
+
+    // 1) Mark-to-market first: an already-open position gets a chance to
+    //    close on THIS tick before a new one can be opened.
+    const markEv = this.broker.mark(tick.price, tick.ts);
+    if (markEv && markEv.kind === "CLOSE") {
+      entries.push(
+        this.ledger.append("TRADE_CLOSED", tick.ts, {
+          id: markEv.trade.id,
+          side: markEv.trade.side,
+          entry: markEv.trade.entry,
+          exit: markEv.trade.exit,
+          qty: markEv.trade.qty,
+          pnl: markEv.trade.pnl,
+          reason: markEv.trade.reason,
+        }),
+      );
+    }
+
+    // 2) If gates passed AND fusion is directional, log intent + open.
     if (report.allPassed) {
+      const dir: Side | null =
+        input.intent === "long" || input.intent === "short" ? input.intent : null;
       entries.push(
         this.ledger.append("ORDER_INTENT", tick.ts, {
           twinSeq: tick.twinSeq,
           mode: "PAPER",
           price: tick.price,
-          note: "simulated — no broker execution",
+          intent: dir ?? "flat",
         }),
       );
+      if (dir) {
+        const fill = this.broker.open({
+          side: dir,
+          price: tick.price,
+          ts: tick.ts,
+          twinSeq: tick.twinSeq,
+        });
+        if (fill && fill.kind === "FILL") {
+          entries.push(
+            this.ledger.append("ORDER_FILLED", tick.ts, {
+              id: fill.position.id,
+              side: fill.position.side,
+              entry: fill.position.entry,
+              stop: fill.position.stop,
+              target: fill.position.target,
+              qty: fill.position.qty,
+            }),
+          );
+        }
+      }
     } else if (report.failedAt === "G7_RISK" || report.failedAt === "G8_AUTHORITY") {
       entries.push(
         this.ledger.append("AUTHORITY_VETO", tick.ts, {
@@ -106,12 +152,13 @@ export class PaperHarness {
       );
     }
 
-    return { twin, ppg, report, entries };
+    return { twin, ppg, report, entries, broker: this.broker.stats() };
   }
 
   reset(): void {
     this.market.reset();
     this.ledger.reset();
+    this.broker.reset();
     resetWelford();
   }
 }
