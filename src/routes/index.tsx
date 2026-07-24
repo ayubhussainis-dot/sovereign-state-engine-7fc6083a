@@ -90,6 +90,12 @@ function Index() {
       bid: mirror.bid > 0 ? mirror.bid : futures?.markPrice ?? undefined,
       ask: mirror.ask > 0 ? mirror.ask : futures?.markPrice ?? undefined,
       side: fusion.verdict === "LOCKED-BULL" ? "buy" : fusion.verdict === "LOCKED-BEAR" ? "sell" : undefined,
+      intent:
+        fusion.verdict === "LOCKED-BULL"
+          ? "long"
+          : fusion.verdict === "LOCKED-BEAR"
+            ? "short"
+            : "flat",
     });
     setCycle(c);
   }, [mode, harness, wsTrade.lastPrice, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
@@ -323,7 +329,7 @@ function Index() {
             AUTHORITY:{" "}
             {cycle.report.allPassed ? (
               <span className="text-emerald-400">
-                GRANTED · ORDER_INTENT logged (paper — no execution)
+                GRANTED · paper execution armed
               </span>
             ) : (
               <span className="text-red-400">
@@ -331,6 +337,68 @@ function Index() {
               </span>
             )}
           </div>
+        </div>
+      )}
+      {mode === "PAPER_TESTNET" && cycle && (
+        <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest space-y-1">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span className="text-emerald-400">PAPER BROKER · LIVE TICKS · NO BROKER CALLS</span>
+            <span className="text-zinc-400">
+              TRADES: <span className="text-zinc-200">{cycle.broker.trades}</span>
+            </span>
+            <span className="text-zinc-400">
+              WINS: <span className="text-emerald-400">{cycle.broker.wins}</span>
+            </span>
+            <span className="text-zinc-400">
+              LOSSES: <span className="text-red-400">{cycle.broker.losses}</span>
+            </span>
+            <span className="text-zinc-400">
+              WIN%: <span className="text-zinc-200">{(cycle.broker.winRate * 100).toFixed(1)}%</span>
+            </span>
+            <span className="text-zinc-400">
+              CUM PnL:{" "}
+              <span className={cycle.broker.cumPnL >= 0 ? "text-emerald-400" : "text-red-400"}>
+                {cycle.broker.cumPnL >= 0 ? "+" : ""}
+                {cycle.broker.cumPnL.toFixed(4)} USDT
+              </span>
+            </span>
+          </div>
+          {cycle.broker.openPosition ? (
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-zinc-400">
+              <span>
+                OPEN #{cycle.broker.openPosition.id}{" "}
+                <span
+                  className={
+                    cycle.broker.openPosition.side === "long"
+                      ? "text-emerald-400"
+                      : "text-red-400"
+                  }
+                >
+                  {cycle.broker.openPosition.side.toUpperCase()}
+                </span>
+              </span>
+              <span>ENTRY: <span className="text-zinc-200">{cycle.broker.openPosition.entry.toFixed(2)}</span></span>
+              <span>STOP: <span className="text-red-400">{cycle.broker.openPosition.stop.toFixed(2)}</span></span>
+              <span>TGT: <span className="text-emerald-400">{cycle.broker.openPosition.target.toFixed(2)}</span></span>
+              <span>QTY: <span className="text-zinc-200">{cycle.broker.openPosition.qty.toFixed(6)}</span></span>
+              <span>MARK: <span className="text-zinc-200">{wsTrade.lastPrice?.toFixed(2) ?? "—"}</span></span>
+            </div>
+          ) : (
+            <div className="text-zinc-500">FLAT — awaiting G1..G8 pass + LOCKED fusion verdict</div>
+          )}
+          {cycle.broker.lastTrade && (
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-zinc-500">
+              <span>LAST #{cycle.broker.lastTrade.id}</span>
+              <span>{cycle.broker.lastTrade.side.toUpperCase()}</span>
+              <span>E {cycle.broker.lastTrade.entry.toFixed(2)}</span>
+              <span>X {cycle.broker.lastTrade.exit.toFixed(2)}</span>
+              <span>{cycle.broker.lastTrade.reason}</span>
+              <span className={cycle.broker.lastTrade.pnl >= 0 ? "text-emerald-400" : "text-red-400"}>
+                {cycle.broker.lastTrade.pnl >= 0 ? "+" : ""}
+                {cycle.broker.lastTrade.pnl.toFixed(4)} USDT
+              </span>
+            </div>
+          )}
         </div>
       )}
       {!standby && decision && (
