@@ -12,6 +12,8 @@ type Status = "connecting" | "open" | "closed";
 interface FeedState {
   status: Status;
   lastPrice: number | null;
+  lastQty: number | null;
+  lastSide: "buy" | "sell" | null;
   lastTs: number | null;
 }
 
@@ -43,11 +45,18 @@ function open(symbol: string) {
   };
   ws.onmessage = (ev) => {
     try {
-      const msg = JSON.parse(ev.data as string) as { p?: string; T?: number };
+      const msg = JSON.parse(ev.data as string) as {
+        p?: string;
+        q?: string;
+        m?: boolean;
+        T?: number;
+      };
       if (msg.p) {
         feed.state = {
           status: "open",
           lastPrice: +msg.p,
+          lastQty: msg.q ? +msg.q : 0,
+          lastSide: msg.m === true ? "sell" : "buy",
           lastTs: msg.T ?? Date.now(),
         };
         emit(feed);
@@ -72,7 +81,13 @@ export function useBinanceTrade(symbol = "BTCUSDT"): FeedState {
   const key = symbol.toLowerCase();
   const [state, setState] = useState<FeedState>(() => {
     return (
-      feeds.get(key)?.state ?? { status: "closed", lastPrice: null, lastTs: null }
+      feeds.get(key)?.state ?? {
+        status: "closed",
+        lastPrice: null,
+        lastQty: null,
+        lastSide: null,
+        lastTs: null,
+      }
     );
   });
 
@@ -81,7 +96,13 @@ export function useBinanceTrade(symbol = "BTCUSDT"): FeedState {
     if (!feed) {
       feed = {
         ws: null,
-        state: { status: "closed", lastPrice: null, lastTs: null },
+        state: {
+          status: "closed",
+          lastPrice: null,
+          lastQty: null,
+          lastSide: null,
+          lastTs: null,
+        },
         subs: new Set(),
         refCount: 0,
       };

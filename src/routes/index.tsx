@@ -84,12 +84,12 @@ function Index() {
     if (wsTrade.lastPrice == null || wsTrade.lastTs == null) return;
     const c = harness.ingest({
       price: wsTrade.lastPrice,
-      volume: 0,
+      volume: wsTrade.lastQty ?? 0,
       ts: wsTrade.lastTs,
       receivedAt: Date.now(),
       bid: mirror.bid > 0 ? mirror.bid : futures?.markPrice ?? undefined,
       ask: mirror.ask > 0 ? mirror.ask : futures?.markPrice ?? undefined,
-      side: fusion.verdict === "LOCKED-BULL" ? "buy" : fusion.verdict === "LOCKED-BEAR" ? "sell" : undefined,
+      side: wsTrade.lastSide ?? undefined,
       intent:
         fusion.verdict === "LOCKED-BULL"
           ? "long"
@@ -98,7 +98,7 @@ function Index() {
             : "flat",
     });
     setCycle(c);
-  }, [mode, harness, wsTrade.lastPrice, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
+  }, [mode, harness, wsTrade.lastPrice, wsTrade.lastQty, wsTrade.lastSide, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
 
   useEffect(() => {
     if (mode === "STANDBY") harness.reset();
