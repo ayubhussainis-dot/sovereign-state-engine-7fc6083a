@@ -12,6 +12,8 @@ type Status = "connecting" | "open" | "closed";
 interface FeedState {
   status: Status;
   lastPrice: number | null;
+  lastQty: number | null;
+  lastSide: "buy" | "sell" | null;
   lastTs: number | null;
 }
 
