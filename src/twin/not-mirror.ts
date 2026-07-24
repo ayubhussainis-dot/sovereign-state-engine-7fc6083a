@@ -48,24 +48,13 @@ class BinanceMirror {
   private flowEma = 0;
   private pressureEma = 50;
   private reconnectDelay = 1000;
-  private started = false;
 
   start() {
-    if (this.started) return;
-    this.started = true;
+    if (this.ws) return;
     this.connect();
   }
 
-  stop() {
-    this.started = false;
-    try { this.ws?.close(); } catch { /* noop */ }
-    this.ws = null;
-    this.frame.connected = false;
-    this.emit();
-  }
-
   private connect() {
-    if (!this.started) return;
     try {
       this.ws = new WebSocket(STREAM_URL);
     } catch {
@@ -90,7 +79,6 @@ class BinanceMirror {
 
   private scheduleReconnect() {
     this.ws = null;
-    if (!this.started) return;
     const d = Math.min(this.reconnectDelay, 15000);
     this.reconnectDelay = Math.min(d * 2, 15000);
     setTimeout(() => this.connect(), d);
@@ -166,17 +154,13 @@ class BinanceMirror {
 }
 
 export const binanceMirror = new BinanceMirror();
+if (typeof window !== "undefined") binanceMirror.start();
 
-export function useMirrorFrame(active: boolean): MirrorFrame {
+export function useMirrorFrame(): MirrorFrame {
   const [frame, setFrame] = useState<MirrorFrame>(() => binanceMirror.current);
   useEffect(() => {
-    if (!active) {
-      binanceMirror.stop();
-      return;
-    }
-    binanceMirror.start();
     const unsub = binanceMirror.subscribe(setFrame);
     return () => { unsub(); };
-  }, [active]);
+  }, []);
   return frame;
 }
