@@ -315,25 +315,33 @@ function Index() {
               <span
                 key={o.gate}
                 className={`px-2 py-1 border ${
-                  o.passed
+                  o.hardVeto && !o.passed
+                    ? "border-red-900 text-red-400"
+                    : o.score >= 0.66
                     ? "border-emerald-900 text-emerald-400"
-                    : "border-red-900 text-red-400"
+                    : o.score >= 0.33
+                    ? "border-amber-900 text-amber-400"
+                    : "border-zinc-800 text-zinc-500"
                 }`}
                 title={o.reason}
               >
-                {o.gate.replace("_", " ")} {o.passed ? "✓" : "✗"}
+                {o.gate.replace("_", " ")} {o.score.toFixed(2)}
               </span>
             ))}
           </div>
           <div>
+            COMPOSITE: <span className="text-zinc-200">{cycle.report.compositeScore.toFixed(3)}</span>
+            {" / "}
+            <span className="text-zinc-500">{cycle.report.compositeThreshold.toFixed(2)}</span>
+            {"  ·  "}
             AUTHORITY:{" "}
-            {cycle.report.allPassed ? (
-              <span className="text-emerald-400">
-                GRANTED · paper execution armed
-              </span>
+            {cycle.report.failedAt ? (
+              <span className="text-red-400">HARD VETO · {cycle.report.failedAt}</span>
+            ) : cycle.report.tradeArmed ? (
+              <span className="text-emerald-400">ARMED · paper execution live</span>
             ) : (
-              <span className="text-red-400">
-                VETO at {cycle.report.failedAt}
+              <span className="text-amber-400">
+                STANDBY · composite below threshold
               </span>
             )}
           </div>

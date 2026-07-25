@@ -7,20 +7,25 @@
 
 import type { Gate, GateOutcome } from "../types";
 
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
+
 export const g5Examination: Gate = ({ ppg }): GateOutcome => {
   const hasMomentum = ppg.wave.state !== "NODAL_ZERO";
-  const passed = hasMomentum && ppg.velocity.value > 0;
+  const raw = clamp01(ppg.velocity.value / 0.01);
+  const score = hasMomentum ? raw : raw * 0.5;
+  const passed = true;
   return {
     gate: "G5_EXAMINATION",
     passed,
+    score,
+    weight: 0.75,
+    hardVeto: false,
     evidence: {
       waveState: ppg.wave.state,
       tickRate: ppg.velocity.value,
       hasMomentum,
     },
-    reason: passed
-      ? "examination vector confirmed"
-      : "Examination halted: Wave state is Nodal Zero or tick velocity is zero",
+    reason: `examination ${score.toFixed(3)} · τ=${ppg.velocity.value.toFixed(4)}/ms`,
     specified: true,
   };
 };

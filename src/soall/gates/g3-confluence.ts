@@ -7,23 +7,25 @@
 
 import type { Gate, GateOutcome } from "../types";
 
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
+
 export const g3Confluence: Gate = ({ ppg }): GateOutcome => {
-  const MIN_OFI_THRESHOLD = 0.05;
   const confluenceScore = Math.abs(ppg.ofi.value);
-  const passed =
-    confluenceScore >= MIN_OFI_THRESHOLD && ppg.wave.state !== "NODAL_ZERO";
+  const raw = clamp01(confluenceScore / 0.2);
+  const score = ppg.wave.state === "NODAL_ZERO" ? raw * 0.5 : raw;
+  const passed = true;
   return {
     gate: "G3_CONFLUENCE",
     passed,
+    score,
+    weight: 1,
+    hardVeto: false,
     evidence: {
       ofiProxy: ppg.ofi.value,
       confluenceScore,
       waveState: ppg.wave.state,
-      threshold: MIN_OFI_THRESHOLD,
     },
-    reason: passed
-      ? "confluence confirmed"
-      : `Insufficient order flow confluence: OFI=${ppg.ofi.value.toFixed(4)} (Threshold: ${MIN_OFI_THRESHOLD})`,
+    reason: `confluence ${score.toFixed(3)} · OFI=${ppg.ofi.value.toFixed(4)} · ${ppg.wave.state}`,
     specified: true,
   };
 };

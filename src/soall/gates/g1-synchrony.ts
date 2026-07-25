@@ -10,12 +10,17 @@
 
 import type { Gate, GateOutcome } from "../types";
 
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
+
 export const g1Synchrony: Gate = ({ twin }): GateOutcome => {
   const last = twin.last;
   if (!last) {
     return {
       gate: "G1_SYNCHRONY",
       passed: false,
+      score: 0,
+      weight: 1,
+      hardVeto: true,
       evidence: { hasTick: false, twinSeq: -1, latencyMs: 0 },
       reason: "no twin tick",
       specified: true,
@@ -26,9 +31,13 @@ export const g1Synchrony: Gate = ({ twin }): GateOutcome => {
   const EPSILON_P = last.price * 0.005;
   const EPSILON_T = 2000;
   const passed = priceDrift <= EPSILON_P && latencyMs <= EPSILON_T;
+  const score = clamp01(1 - latencyMs / EPSILON_T);
   return {
     gate: "G1_SYNCHRONY",
     passed,
+    score,
+    weight: 1,
+    hardVeto: true,
     evidence: { priceDrift, latencyMs, epsilonP: EPSILON_P, epsilonT: EPSILON_T, twinSeq: last.twinSeq },
     reason: passed
       ? "within synchrony bounds"

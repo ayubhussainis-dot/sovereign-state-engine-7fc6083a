@@ -49,6 +49,12 @@ export interface GateInputs {
 export interface GateOutcome {
   gate: GateId;
   passed: boolean;
+  /** Continuous score in [0,1]. 1 = ideal, 0 = degenerate. */
+  score: number;
+  /** Weight of this gate in the composite score. */
+  weight: number;
+  /** True if the gate exercises hard-veto authority (data / risk / lockout). */
+  hardVeto: boolean;
   evidence: Readonly<Record<string, unknown>>;
   reason: string;
   /** True when the gate's mathematical model is fully implemented. */
@@ -59,6 +65,11 @@ export interface GateReport {
   outcomes: readonly GateOutcome[];
   failedAt: GateId | null;
   allPassed: boolean;
+  /** Weighted composite score across all 8 gates, [0,1]. */
+  compositeScore: number;
+  /** True when composite >= threshold AND no hard veto. */
+  tradeArmed: boolean;
+  compositeThreshold: number;
   twinSeq: number;
 }
 

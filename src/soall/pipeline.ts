@@ -42,6 +42,8 @@ export interface PipelineInputs {
   risk: RiskContext;
 }
 
+const COMPOSITE_THRESHOLD = 0.55;
+
 export function runPipeline(inputs: PipelineInputs): GateReport {
   const outcomes: GateOutcome[] = [];
   const priorPasses: GateId[] = [];
@@ -56,17 +58,28 @@ export function runPipeline(inputs: PipelineInputs): GateReport {
     };
     const outcome = gate(gateInputs);
     outcomes.push(outcome);
-    if (!outcome.passed) {
+    if (!outcome.passed && outcome.hardVeto && failedAt === null) {
       failedAt = outcome.gate;
-      break;
     }
-    priorPasses.push(outcome.gate);
+    if (outcome.passed) priorPasses.push(outcome.gate);
   }
+
+  let weightSum = 0;
+  let weighted = 0;
+  for (const o of outcomes) {
+    weightSum += o.weight;
+    weighted += o.weight * o.score;
+  }
+  const compositeScore = weightSum > 0 ? weighted / weightSum : 0;
+  const tradeArmed = failedAt === null && compositeScore >= COMPOSITE_THRESHOLD;
 
   return {
     outcomes,
     failedAt,
-    allPassed: failedAt === null,
+    allPassed: tradeArmed,
+    compositeScore,
+    tradeArmed,
+    compositeThreshold: COMPOSITE_THRESHOLD,
     twinSeq: inputs.twin.last?.twinSeq ?? -1,
   };
 }

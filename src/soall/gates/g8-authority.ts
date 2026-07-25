@@ -9,15 +9,9 @@
 
 import type { Gate, GateId, GateOutcome } from "../types";
 
-const REQUIRED: readonly GateId[] = [
-  "G1_SYNCHRONY",
-  "G2_STRUCTURE",
-  "G3_CONFLUENCE",
-  "G4_PATTERN",
-  "G5_EXAMINATION",
-  "G6_CONFIDENCE",
-  "G7_RISK",
-];
+// Only hard-veto gates gate authority. Scored gates (G2..G6) always
+// run and feed the composite score consumed downstream.
+const REQUIRED: readonly GateId[] = ["G1_SYNCHRONY", "G7_RISK"];
 
 export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
   const passedSet = new Set(priorPasses);
@@ -27,6 +21,9 @@ export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
   return {
     gate: "G8_AUTHORITY",
     passed,
+    score: passed ? 1 : 0,
+    weight: 1,
+    hardVeto: true,
     evidence: {
       authorityToken: passed ? 1 : 0,
       systemHealth: risk.systemHealth,
