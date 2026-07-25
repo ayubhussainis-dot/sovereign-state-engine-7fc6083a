@@ -22,6 +22,9 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
   return {
     gate: "G7_RISK",
     passed,
+    score: passed ? Math.max(0, 1 - risk.drawdownFraction * 10) : 0,
+    weight: 1,
+    hardVeto: true,
     evidence: {
       drawdownFraction: risk.drawdownFraction,
       consecutiveLosses: risk.consecutiveLosses,
