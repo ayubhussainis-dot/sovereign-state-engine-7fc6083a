@@ -165,7 +165,7 @@ export class PaperHarness {
     }
 
     // 3) Nothing opened this cycle → journal exactly WHY.
-    if (!this.broker.stats().open) {
+    if (!this.broker.stats().openPosition) {
       const dir =
         input.intent === "long" || input.intent === "short" ? input.intent : null;
       const weakest = report.outcomes.reduce((a, b) => (b.score < a.score ? b : a));
