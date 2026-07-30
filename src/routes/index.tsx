@@ -414,10 +414,20 @@ function Index() {
               <span>STOP: <span className="text-red-400">{cycle.broker.openPosition.stop.toFixed(2)}</span></span>
               <span>TGT: <span className="text-emerald-400">{cycle.broker.openPosition.target.toFixed(2)}</span></span>
               <span>QTY: <span className="text-zinc-200">{cycle.broker.openPosition.qty.toFixed(6)}</span></span>
-              <span>MARK: <span className="text-zinc-200">{wsTrade.lastPrice?.toFixed(2) ?? "—"}</span></span>
+              <span>MARK (twin): <span className="text-zinc-200">{cycle.twin.last?.price.toFixed(2) ?? "—"}</span></span>
             </div>
           ) : (
-            <div className="text-zinc-500">FLAT — awaiting G1..G8 pass + LOCKED fusion verdict</div>
+            <div className="text-zinc-500">
+              FLAT — BLOCKED BY:{" "}
+              <span className="text-amber-400">
+                {String(
+                  [...cycle.entries]
+                    .reverse()
+                    .find((e) => e.kind === "EXEC_BLOCK")?.payload.blockedBy ??
+                    "—",
+                )}
+              </span>
+            </div>
           )}
           {cycle.broker.lastTrade && (
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-zinc-500">
