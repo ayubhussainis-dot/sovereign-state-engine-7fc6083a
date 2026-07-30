@@ -6,7 +6,7 @@ import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useBinanceTrade } from "@/hooks/use-binance-feed";
 import { PaperHarness, type HarnessCycle } from "@/twin/paper-harness";
-import { useFusion } from "@/twin/fusion";
+import { useFusion, fusionBlocker } from "@/twin/fusion";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -96,6 +96,17 @@ function Index() {
           : fusion.verdict === "LOCKED-BEAR"
             ? "short"
             : "flat",
+      fusion: {
+        verdict: fusion.verdict,
+        agreement: fusion.agreement,
+        consensusBull: fusion.consensusBull,
+        consensusBear: fusion.consensusBear,
+        notAxis: fusion.not.axis,
+        tonAxis: fusion.ton.axis,
+        notConfidence: fusion.not.confidence,
+        tonConfidence: fusion.ton.confidence,
+        blocker: fusionBlocker(fusion),
+      },
     });
     setCycle(c);
   }, [mode, harness, wsTrade.lastPrice, wsTrade.lastQty, wsTrade.lastSide, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
