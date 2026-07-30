@@ -20,7 +20,8 @@ export type AuditKind =
   | "ORDER_INTENT"
   | "ORDER_FILLED"
   | "TRADE_CLOSED"
-  | "AUTHORITY_VETO";
+  | "AUTHORITY_VETO"
+  | "EXEC_BLOCK";
 
 export interface AuditEntry {
   seq: number;
