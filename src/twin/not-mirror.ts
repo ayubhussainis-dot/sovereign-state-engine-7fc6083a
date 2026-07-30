@@ -20,6 +20,10 @@ export type MirrorFrame = {
   bidPressure: number;   // 0..100
   askPressure: number;   // 0..100
   orderFlow: number;     // signed taker volume EMA (0..160 scaled)
+  /** Signed, self-normalised taker flow imbalance in [-1, 1]. */
+  flowImbalance: number;
+  /** EMA of |signed taker qty| — the normalising scale for flowImbalance. */
+  flowScale: number;
   latencyNs: number;     // event-to-client latency (ns)
   fundingBps: number;    // funding rate in bps
   lastTradeAt: number;
@@ -39,13 +43,15 @@ class BinanceMirror {
     bid: 0, ask: 0, bidQty: 0, askQty: 0, mid: 0,
     spreadBps: 0, velocityBps: 0,
     bidPressure: 50, askPressure: 50,
-    orderFlow: 0, latencyNs: 0, fundingBps: 0,
+    orderFlow: 0, flowImbalance: 0, flowScale: 0,
+    latencyNs: 0, fundingBps: 0,
     lastTradeAt: 0,
   };
   private lastMid = 0;
   private lastMidAt = 0;
   private velEma = 0;
   private flowEma = 0;
+  private absFlowEma = 0;
   private pressureEma = 50;
   private reconnectDelay = 1000;
 
@@ -122,11 +128,19 @@ class BinanceMirror {
       const isBuyerMaker = !!d.m;
       const signed = (isBuyerMaker ? -1 : 1) * qty;
       this.flowEma = this.flowEma * 0.9 + signed * 0.1;
+      // Self-normalising scale: EMA of trade magnitude. Dividing the signed
+      // flow EMA by it yields a real directional magnitude in [-1, 1]
+      // regardless of the instrument's absolute lot size.
+      this.absFlowEma = this.absFlowEma * 0.9 + Math.abs(signed) * 0.1;
+      const scale = Math.max(this.absFlowEma, 1e-8);
+      const flowImbalance = Math.max(-1, Math.min(1, this.flowEma / scale));
       const eventMs = Number(d.E ?? d.T ?? nowMs);
       const latencyMs = Math.max(0, nowMs - eventMs);
       this.frame = {
         ...this.frame,
-        orderFlow: Math.max(0, Math.min(160, 80 + this.flowEma * 4)),
+        orderFlow: Math.max(0, Math.min(160, 80 + flowImbalance * 80)),
+        flowImbalance,
+        flowScale: this.absFlowEma,
         latencyNs: latencyMs * 1_000_000,
         lastTradeAt: nowMs,
       };

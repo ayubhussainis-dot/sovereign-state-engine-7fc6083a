@@ -43,6 +43,18 @@ export interface HarnessTickInput {
   side?: LiveTick["side"];
   /** Directional intent from the fusion layer; drives paper entries. */
   intent?: Side | "flat";
+  /** Diagnostic from the fusion layer: which term blocked a LOCKED verdict. */
+  fusion?: {
+    verdict: string;
+    agreement: number;
+    consensusBull: number;
+    consensusBear: number;
+    notAxis: number;
+    tonAxis: number;
+    notConfidence: number;
+    tonConfidence: number;
+    blocker: string | null;
+  };
 }
 
 export class PaperHarness {
@@ -148,6 +160,53 @@ export class PaperHarness {
         this.ledger.append("AUTHORITY_VETO", tick.ts, {
           twinSeq: tick.twinSeq,
           failedAt: report.failedAt,
+        }),
+      );
+    }
+
+    // 3) Nothing opened this cycle → journal exactly WHY.
+    if (!this.broker.stats().openPosition) {
+      const dir =
+        input.intent === "long" || input.intent === "short" ? input.intent : null;
+      const weakest = report.outcomes.reduce((a, b) => (b.score < a.score ? b : a));
+      let blockedBy: string;
+      let detail: Record<string, unknown>;
+      if (report.failedAt) {
+        blockedBy = `HARD_VETO:${report.failedAt}`;
+        detail = {
+          reason:
+            report.outcomes.find((o) => o.gate === report.failedAt)?.reason ?? "",
+        };
+      } else if (!report.tradeArmed) {
+        blockedBy = "COMPOSITE_BELOW_THRESHOLD";
+        detail = {
+          composite: report.compositeScore,
+          threshold: report.compositeThreshold,
+          weakestGate: weakest.gate,
+          weakestScore: weakest.score,
+          weakestReason: weakest.reason,
+        };
+      } else if (!dir) {
+        blockedBy = `FUSION:${input.fusion?.blocker ?? "NO_DIRECTION"}`;
+        detail = {
+          verdict: input.fusion?.verdict ?? "UNKNOWN",
+          agreement: input.fusion?.agreement,
+          consensusBull: input.fusion?.consensusBull,
+          consensusBear: input.fusion?.consensusBear,
+          notAxis: input.fusion?.notAxis,
+          tonAxis: input.fusion?.tonAxis,
+          notConfidence: input.fusion?.notConfidence,
+          tonConfidence: input.fusion?.tonConfidence,
+        };
+      } else {
+        blockedBy = "BROKER_REJECTED";
+        detail = { intent: dir };
+      }
+      entries.push(
+        this.ledger.append("EXEC_BLOCK", tick.ts, {
+          twinSeq: tick.twinSeq,
+          blockedBy,
+          ...detail,
         }),
       );
     }

@@ -47,7 +47,12 @@ export function readNOT(f: MirrorFrame): LensReading {
 }
 
 export function readTON(f: MirrorFrame): LensReading {
-  const flowNorm = (f.orderFlow - 80) / 80;
+  // Real directional magnitude: signed taker flow normalised by its own
+  // magnitude scale. Falls back to the legacy 0..160 encoding if absent.
+  const flowNorm =
+    typeof f.flowImbalance === "number" && f.flowScale > 0
+      ? Math.max(-1, Math.min(1, f.flowImbalance))
+      : (f.orderFlow - 80) / 80;
   const vel = Math.min(1, f.velocityBps / 8);
   const kinetic = Math.sign(flowNorm) * vel;
   const axis = Math.max(-1, Math.min(1, flowNorm * 0.5 + kinetic * 0.5));
@@ -59,7 +64,7 @@ export function readTON(f: MirrorFrame): LensReading {
     bearish: Math.max(0, -axis),
     tension: 1 - Math.abs(axis),
     confidence: f.connected ? freshness : 0,
-    axis: flowNorm * 100,
+    axis: axis * 100,
   };
 }
 
@@ -87,6 +92,22 @@ export function fuse(not: LensReading, ton: LensReading): Fusion {
   else verdict = "SPLIT";
 
   return { not, ton, consensusBull, consensusBear, agreement, residual, residualOwner, verdict };
+}
+
+/** Names the single term that prevented a LOCKED verdict. Pure. */
+export function fusionBlocker(f: Fusion): string | null {
+  if (f.verdict === "LOCKED-BULL" || f.verdict === "LOCKED-BEAR") return null;
+  const w = Math.sqrt(f.not.confidence * f.ton.confidence);
+  if (w < 0.05) {
+    return f.not.confidence <= f.ton.confidence
+      ? "NOT_CONFIDENCE_LOW"
+      : "TON_CONFIDENCE_LOW";
+  }
+  if (f.agreement <= 0.7) return "AGREEMENT_BELOW_0.70";
+  if (Math.abs(f.consensusBull - f.consensusBear) <= 0.05) {
+    return "CONSENSUS_MARGIN_BELOW_0.05";
+  }
+  return "UNSPECIFIED_SPLIT";
 }
 
 export function useFusion(intervalMs = 200): { fusion: Fusion; frame: MirrorFrame } {

@@ -6,7 +6,7 @@ import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useBinanceTrade } from "@/hooks/use-binance-feed";
 import { PaperHarness, type HarnessCycle } from "@/twin/paper-harness";
-import { useFusion } from "@/twin/fusion";
+import { useFusion, fusionBlocker } from "@/twin/fusion";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -96,6 +96,17 @@ function Index() {
           : fusion.verdict === "LOCKED-BEAR"
             ? "short"
             : "flat",
+      fusion: {
+        verdict: fusion.verdict,
+        agreement: fusion.agreement,
+        consensusBull: fusion.consensusBull,
+        consensusBear: fusion.consensusBear,
+        notAxis: fusion.not.axis,
+        tonAxis: fusion.ton.axis,
+        notConfidence: fusion.not.confidence,
+        tonConfidence: fusion.ton.confidence,
+        blocker: fusionBlocker(fusion),
+      },
     });
     setCycle(c);
   }, [mode, harness, wsTrade.lastPrice, wsTrade.lastQty, wsTrade.lastSide, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
@@ -171,18 +182,32 @@ function Index() {
       <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest flex flex-wrap gap-x-6 gap-y-1">
         <span className="text-zinc-500">BINANCE FUTURES TESTNET · BTCUSDT</span>
         <span className="text-zinc-400">
-          LAST:{" "}
+          TWIN LAST (pipeline):{" "}
+          {cycle?.twin.last?.price != null ? (
+            <span className="text-emerald-400">
+              {cycle.twin.last.price.toFixed(2)}
+            </span>
+          ) : (
+            <span className="text-zinc-600">—</span>
+          )}
+          <span className="text-zinc-600">
+            {" "}
+            [seq {cycle?.twin.last?.twinSeq ?? "—"}]
+          </span>
+        </span>
+        <span className="text-zinc-400">
+          WS RAW (pre-twin):{" "}
           {wsTrade.lastPrice != null ? (
-            <span className="text-emerald-400">{wsTrade.lastPrice.toFixed(2)}</span>
+            <span className="text-zinc-200">{wsTrade.lastPrice.toFixed(2)}</span>
           ) : futures?.lastPrice != null ? (
-            <span className="text-emerald-400">{futures.lastPrice.toFixed(2)}</span>
+            <span className="text-zinc-200">{futures.lastPrice.toFixed(2)}</span>
           ) : (
             <span className="text-amber-400">—</span>
           )}
           <span className="text-zinc-600"> [WS {wsTrade.status}]</span>
         </span>
         <span className="text-zinc-400">
-          MARK:{" "}
+          MARK (REST acct):{" "}
           {futures?.markPrice != null ? (
             <span className="text-emerald-400">{futures.markPrice.toFixed(2)}</span>
           ) : (
@@ -389,10 +414,20 @@ function Index() {
               <span>STOP: <span className="text-red-400">{cycle.broker.openPosition.stop.toFixed(2)}</span></span>
               <span>TGT: <span className="text-emerald-400">{cycle.broker.openPosition.target.toFixed(2)}</span></span>
               <span>QTY: <span className="text-zinc-200">{cycle.broker.openPosition.qty.toFixed(6)}</span></span>
-              <span>MARK: <span className="text-zinc-200">{wsTrade.lastPrice?.toFixed(2) ?? "—"}</span></span>
+              <span>MARK (twin): <span className="text-zinc-200">{cycle.twin.last?.price.toFixed(2) ?? "—"}</span></span>
             </div>
           ) : (
-            <div className="text-zinc-500">FLAT — awaiting G1..G8 pass + LOCKED fusion verdict</div>
+            <div className="text-zinc-500">
+              FLAT — BLOCKED BY:{" "}
+              <span className="text-amber-400">
+                {String(
+                  [...cycle.entries]
+                    .reverse()
+                    .find((e) => e.kind === "EXEC_BLOCK")?.payload.blockedBy ??
+                    "—",
+                )}
+              </span>
+            </div>
           )}
           {cycle.broker.lastTrade && (
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-zinc-500">
