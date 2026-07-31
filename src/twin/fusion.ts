@@ -11,7 +11,7 @@
 // ============================================================
 
 import { useEffect, useState } from "react";
-import { binanceMirror, type MirrorFrame } from "./not-mirror";
+import { getMirror, type MirrorFrame } from "./not-mirror";
 
 export type LensReading = {
   bullish: number;
@@ -110,17 +110,25 @@ export function fusionBlocker(f: Fusion): string | null {
   return "UNSPECIFIED_SPLIT";
 }
 
-export function useFusion(intervalMs = 200): { fusion: Fusion; frame: MirrorFrame } {
+/** Fuse straight from a mirror frame. Pure. */
+export function fuseFrame(f: MirrorFrame): Fusion {
+  return fuse(readNOT(f), readTON(f));
+}
+
+export function useFusion(
+  intervalMs = 200,
+  pair = "BTCUSDT",
+): { fusion: Fusion; frame: MirrorFrame } {
   const [state, setState] = useState(() => {
-    const f = binanceMirror.current;
-    return { fusion: fuse(readNOT(f), readTON(f)), frame: f };
+    const f = getMirror(pair).current;
+    return { fusion: fuseFrame(f), frame: f };
   });
   useEffect(() => {
     const id = setInterval(() => {
-      const f = binanceMirror.current;
-      setState({ fusion: fuse(readNOT(f), readTON(f)), frame: f });
+      const f = getMirror(pair).current;
+      setState({ fusion: fuseFrame(f), frame: f });
     }, intervalMs);
     return () => clearInterval(id);
-  }, [intervalMs]);
+  }, [intervalMs, pair]);
   return state;
 }

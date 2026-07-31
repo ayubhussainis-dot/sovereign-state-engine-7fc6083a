@@ -17,7 +17,7 @@
  */
 
 import { InternalMarket } from "./internal-market";
-import { resetWelford, profile } from "@/ppg/profiler";
+import { profile, Welford } from "@/ppg/profiler";
 import { runPipeline } from "@/soall/pipeline";
 import { AuditLedger, type AuditEntry } from "@/lib/audit-ledger";
 import type { RiskContext, GateReport } from "@/soall/types";
@@ -58,7 +58,9 @@ export interface HarnessTickInput {
 }
 
 export class PaperHarness {
+  readonly symbol: string;
   private readonly market = new InternalMarket({ capacity: 4096 });
+  private readonly welford = new Welford();
   readonly ledger = new AuditLedger(4096);
   readonly broker = new PaperBroker();
   private risk: RiskContext = {
@@ -66,6 +68,10 @@ export class PaperHarness {
     consecutiveLosses: 0,
     systemHealth: "NORMAL",
   };
+
+  constructor(symbol = "BTCUSDT") {
+    this.symbol = symbol;
+  }
 
   setRisk(risk: Partial<RiskContext>): void {
     this.risk = { ...this.risk, ...risk };
@@ -83,7 +89,7 @@ export class PaperHarness {
     };
     const tick = this.market.append(live);
     const twin = this.market.snapshot();
-    const ppg = profile({ twin });
+    const ppg = profile({ twin }, this.welford);
     const report = runPipeline({ twin, ppg, risk: this.risk });
 
     const entries: AuditEntry[] = [];
@@ -218,6 +224,6 @@ export class PaperHarness {
     this.market.reset();
     this.ledger.reset();
     this.broker.reset();
-    resetWelford();
+    this.welford.reset();
   }
 }

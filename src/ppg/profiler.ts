@@ -28,35 +28,50 @@ import type {
   WaveReading,
 } from "./types";
 
-// Welford's O(1) rolling variance accumulator. Module-level state is
-// intentional per spec: successive `profile()` calls fold new price
-// samples into the same running estimator, and replaying the same tick
-// sequence against a fresh module yields identical outputs.
-let welfordCount = 0;
-let welfordMean = 0;
-let welfordM2 = 0;
+// Welford's O(1) rolling variance accumulator. State is per-accumulator so
+// that each market runs a fully independent estimator; replaying the same
+// tick sequence against a fresh accumulator yields identical outputs.
+export class Welford {
+  count = 0;
+  mean = 0;
+  m2 = 0;
+
+  update(price: number): number {
+    this.count += 1;
+    const delta = price - this.mean;
+    this.mean += delta / this.count;
+    const delta2 = price - this.mean;
+    this.m2 += delta * delta2;
+    return this.count > 1 ? this.m2 / (this.count - 1) : 0;
+  }
+
+  reset(): void {
+    this.count = 0;
+    this.mean = 0;
+    this.m2 = 0;
+  }
+}
+
+/** Default accumulator, used when no per-market accumulator is passed. */
+const defaultWelford = new Welford();
 
 export function updateWelfordVariance(price: number): number {
-  welfordCount += 1;
-  const delta = price - welfordMean;
-  welfordMean += delta / welfordCount;
-  const delta2 = price - welfordMean;
-  welfordM2 += delta * delta2;
-  return welfordCount > 1 ? welfordM2 / (welfordCount - 1) : 0;
+  return defaultWelford.update(price);
 }
 
 export function resetWelford(): void {
-  welfordCount = 0;
-  welfordMean = 0;
-  welfordM2 = 0;
+  defaultWelford.reset();
 }
 
-export function measureVolatility(twin: TwinSnapshot): VolatilityReading {
+export function measureVolatility(
+  twin: TwinSnapshot,
+  welford: Welford = defaultWelford,
+): VolatilityReading {
   const last = twin.last;
-  const variance = last ? updateWelfordVariance(last.price) : 0;
+  const variance = last ? welford.update(last.price) : 0;
   const denom = last?.price || 1;
   const value = Math.sqrt(variance) / denom;
-  return { value, n: welfordCount, specified: true };
+  return { value, n: welford.count, specified: true };
 }
 
 export function measureOFI(twin: TwinSnapshot): OFIReading {
@@ -97,9 +112,12 @@ export function classifyWave(
   return { state, specified: true };
 }
 
-export function profile(inputs: PPGInputs): PPGSnapshot {
+export function profile(
+  inputs: PPGInputs,
+  welford: Welford = defaultWelford,
+): PPGSnapshot {
   const { twin } = inputs;
-  const volatility = measureVolatility(twin);
+  const volatility = measureVolatility(twin, welford);
   const ofi = measureOFI(twin);
   const spread = measureSpread(twin);
   const velocity = measureTickVelocity(twin);

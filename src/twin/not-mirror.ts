@@ -27,26 +27,28 @@ export type MirrorFrame = {
   latencyNs: number;     // event-to-client latency (ns)
   fundingBps: number;    // funding rate in bps
   lastTradeAt: number;
+  /** Last taker trade price (aggTrade). Drives the twin tick tape. */
+  lastPrice: number;
+  /** Last taker trade quantity. */
+  lastQty: number;
+  /** Aggressor side of the last taker trade. */
+  lastSide: "buy" | "sell" | null;
+  /** Exchange event timestamp of the last taker trade (ms). */
+  lastEventTs: number;
 };
 
-const SYMBOL = "btcusdt";
-const STREAM_URL = `wss://stream.binance.com:9443/stream?streams=${SYMBOL}@bookTicker/${SYMBOL}@aggTrade/${SYMBOL}@markPrice@1s`;
+function streamUrl(symbol: string) {
+  const s = symbol.toLowerCase();
+  return `wss://stream.binance.com:9443/stream?streams=${s}@bookTicker/${s}@aggTrade/${s}@markPrice@1s`;
+}
 
 type Listener = (f: MirrorFrame) => void;
 
-class BinanceMirror {
+export class BinanceMirror {
+  readonly pair: string;
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
-  private frame: MirrorFrame = {
-    connected: false,
-    symbol: "BTC-USDT",
-    bid: 0, ask: 0, bidQty: 0, askQty: 0, mid: 0,
-    spreadBps: 0, velocityBps: 0,
-    bidPressure: 50, askPressure: 50,
-    orderFlow: 0, flowImbalance: 0, flowScale: 0,
-    latencyNs: 0, fundingBps: 0,
-    lastTradeAt: 0,
-  };
+  private frame: MirrorFrame;
   private lastMid = 0;
   private lastMidAt = 0;
   private velEma = 0;
@@ -55,6 +57,21 @@ class BinanceMirror {
   private pressureEma = 50;
   private reconnectDelay = 1000;
 
+  constructor(pair: string) {
+    this.pair = pair.toUpperCase();
+    this.frame = {
+      connected: false,
+      symbol: this.pair,
+      bid: 0, ask: 0, bidQty: 0, askQty: 0, mid: 0,
+      spreadBps: 0, velocityBps: 0,
+      bidPressure: 50, askPressure: 50,
+      orderFlow: 0, flowImbalance: 0, flowScale: 0,
+      latencyNs: 0, fundingBps: 0,
+      lastTradeAt: 0,
+      lastPrice: 0, lastQty: 0, lastSide: null, lastEventTs: 0,
+    };
+  }
+
   start() {
     if (this.ws) return;
     this.connect();
@@ -62,7 +79,7 @@ class BinanceMirror {
 
   private connect() {
     try {
-      this.ws = new WebSocket(STREAM_URL);
+      this.ws = new WebSocket(streamUrl(this.pair));
     } catch {
       this.scheduleReconnect();
       return;
@@ -125,6 +142,7 @@ class BinanceMirror {
       this.emit();
     } else if (stream.endsWith("@aggTrade")) {
       const qty = parseFloat(String(d.q));
+      const price = parseFloat(String(d.p));
       const isBuyerMaker = !!d.m;
       const signed = (isBuyerMaker ? -1 : 1) * qty;
       this.flowEma = this.flowEma * 0.9 + signed * 0.1;
@@ -143,6 +161,10 @@ class BinanceMirror {
         flowScale: this.absFlowEma,
         latencyNs: latencyMs * 1_000_000,
         lastTradeAt: nowMs,
+        lastPrice: isNaN(price) ? this.frame.lastPrice : price,
+        lastQty: isNaN(qty) ? 0 : qty,
+        lastSide: isBuyerMaker ? "sell" : "buy",
+        lastEventTs: eventMs,
       };
       this.emit();
     } else if (stream.endsWith("@markPrice@1s")) {
@@ -167,14 +189,28 @@ class BinanceMirror {
   get current() { return this.frame; }
 }
 
-export const binanceMirror = new BinanceMirror();
-if (typeof window !== "undefined") binanceMirror.start();
+const mirrors = new Map<string, BinanceMirror>();
 
-export function useMirrorFrame(): MirrorFrame {
-  const [frame, setFrame] = useState<MirrorFrame>(() => binanceMirror.current);
+/** One mirror per market pair. Started lazily on first request. */
+export function getMirror(pair: string): BinanceMirror {
+  const key = pair.toUpperCase();
+  let m = mirrors.get(key);
+  if (!m) {
+    m = new BinanceMirror(key);
+    mirrors.set(key, m);
+    if (typeof window !== "undefined") m.start();
+  }
+  return m;
+}
+
+/** Legacy default handle — BTCUSDT. */
+export const binanceMirror = getMirror("BTCUSDT");
+
+export function useMirrorFrame(pair = "BTCUSDT"): MirrorFrame {
+  const [frame, setFrame] = useState<MirrorFrame>(() => getMirror(pair).current);
   useEffect(() => {
-    const unsub = binanceMirror.subscribe(setFrame);
+    const unsub = getMirror(pair).subscribe(setFrame);
     return () => { unsub(); };
-  }, []);
+  }, [pair]);
   return frame;
 }
