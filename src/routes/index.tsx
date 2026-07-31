@@ -4,9 +4,8 @@ import { RihalDashboard } from "@/components/RihalDashboard";
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
-import { useBinanceTrade } from "@/hooks/use-binance-feed";
-import { PaperHarness, type HarnessCycle } from "@/twin/paper-harness";
-import { useFusion, fusionBlocker } from "@/twin/fusion";
+import { useMarkets } from "@/hooks/use-markets";
+import { MARKETS, getEngine } from "@/twin/markets";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -49,17 +48,22 @@ function Index() {
   const workerRef = useRef<Worker | null>(null);
   const [futures, setFutures] = useState<FuturesTelemetrySnapshot | null>(null);
   const [futuresError, setFuturesError] = useState<string | null>(null);
-  const wsTrade = useBinanceTrade("BTCUSDT");
-  const harness = useMemo(() => new PaperHarness(), []);
-  const [cycle, setCycle] = useState<HarnessCycle | null>(null);
-  const { fusion, frame: mirror } = useFusion(200);
+  const [selected, setSelected] = useState<string>("BTCUSDT");
+  const markets = useMarkets(mode === "PAPER_TESTNET");
+  const sel = useMemo(
+    () => markets.find((m) => m.symbol === selected) ?? markets[0],
+    [markets, selected],
+  );
+  const cycle = sel?.cycle ?? null;
+  const mirror = sel?.frame;
+  const fusion = sel?.fusion;
 
   useEffect(() => {
     if (mode === "STANDBY") return;
     let cancelled = false;
     const tick = async () => {
       try {
-        const snap = await getFuturesTelemetry({ data: { symbol: "BTCUSDT" } });
+        const snap = await getFuturesTelemetry({ data: { symbol: selected } });
         if (!cancelled) {
           setFutures(snap);
           setFuturesError(null);
@@ -76,44 +80,7 @@ function Index() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [mode]);
-
-  // PAPER_TESTNET: pipe live WS ticks through the MDT → PPG → SOALL pipeline.
-  useEffect(() => {
-    if (mode !== "PAPER_TESTNET") return;
-    if (wsTrade.lastPrice == null || wsTrade.lastTs == null) return;
-    const c = harness.ingest({
-      price: wsTrade.lastPrice,
-      volume: wsTrade.lastQty ?? 0,
-      ts: wsTrade.lastTs,
-      receivedAt: Date.now(),
-      bid: mirror.bid > 0 ? mirror.bid : futures?.markPrice ?? undefined,
-      ask: mirror.ask > 0 ? mirror.ask : futures?.markPrice ?? undefined,
-      side: wsTrade.lastSide ?? undefined,
-      intent:
-        fusion.verdict === "LOCKED-BULL"
-          ? "long"
-          : fusion.verdict === "LOCKED-BEAR"
-            ? "short"
-            : "flat",
-      fusion: {
-        verdict: fusion.verdict,
-        agreement: fusion.agreement,
-        consensusBull: fusion.consensusBull,
-        consensusBear: fusion.consensusBear,
-        notAxis: fusion.not.axis,
-        tonAxis: fusion.ton.axis,
-        notConfidence: fusion.not.confidence,
-        tonConfidence: fusion.ton.confidence,
-        blocker: fusionBlocker(fusion),
-      },
-    });
-    setCycle(c);
-  }, [mode, harness, wsTrade.lastPrice, wsTrade.lastQty, wsTrade.lastSide, wsTrade.lastTs, futures?.markPrice, mirror.bid, mirror.ask, fusion.verdict]);
-
-  useEffect(() => {
-    if (mode === "STANDBY") harness.reset();
-  }, [mode, harness]);
+  }, [mode, selected]);
 
   useEffect(() => {
     const worker = new Worker(
