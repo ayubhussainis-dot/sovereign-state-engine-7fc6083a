@@ -147,7 +147,7 @@ function Index() {
         sMultiplier={sMultiplier}
       />
       <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest flex flex-wrap gap-x-6 gap-y-1">
-        <span className="text-zinc-500">BINANCE FUTURES TESTNET · BTCUSDT</span>
+        <span className="text-zinc-500">BINANCE FUTURES TESTNET · {sel?.label ?? "—"}</span>
         <span className="text-zinc-400">
           TWIN LAST (pipeline):{" "}
           {cycle?.twin.last?.price != null ? (
@@ -164,14 +164,17 @@ function Index() {
         </span>
         <span className="text-zinc-400">
           WS RAW (pre-twin):{" "}
-          {wsTrade.lastPrice != null ? (
-            <span className="text-zinc-200">{wsTrade.lastPrice.toFixed(2)}</span>
+          {mirror && mirror.lastPrice > 0 ? (
+            <span className="text-zinc-200">{mirror.lastPrice.toFixed(2)}</span>
           ) : futures?.lastPrice != null ? (
             <span className="text-zinc-200">{futures.lastPrice.toFixed(2)}</span>
           ) : (
             <span className="text-amber-400">—</span>
           )}
-          <span className="text-zinc-600"> [WS {wsTrade.status}]</span>
+          <span className="text-zinc-600">
+            {" "}
+            [WS {mirror?.connected ? "open" : "connecting"}]
+          </span>
         </span>
         <span className="text-zinc-400">
           MARK (REST acct):{" "}
@@ -299,7 +302,9 @@ function Index() {
             <span>Ψ: {cycle.ppg.wave.state}</span>
             <span>
               LEDGER HEAD:{" "}
-              <span className="text-zinc-200">{harness.ledger.head()}</span>
+              <span className="text-zinc-200">
+                {getEngine(selected).harness.ledger.head()}
+              </span>
             </span>
           </div>
           <div className="flex flex-wrap gap-1">
