@@ -263,10 +263,10 @@ function Index() {
           SYSTEM STANDBY — SELECT FEED MODE ABOVE
         </div>
       )}
-      {!standby && (
+      {!standby && mirror && fusion && (
         <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest space-y-1">
           <div className="flex flex-wrap gap-x-6 gap-y-1">
-            <span className="text-zinc-500">N.O.T · TWO-WAY MIRROR</span>
+            <span className="text-zinc-500">N.O.T · TWO-WAY MIRROR · {sel?.label}</span>
             <span className="text-zinc-500">WS {mirror.connected ? <span className="text-emerald-400">LIVE</span> : <span className="text-amber-400">CONNECTING</span>}</span>
             <span className="text-zinc-400">SPREAD: <span className="text-zinc-200">{mirror.spreadBps.toFixed(2)} bps</span></span>
             <span className="text-zinc-400">VEL: <span className="text-zinc-200">{mirror.velocityBps.toFixed(2)} bps/s</span></span>
