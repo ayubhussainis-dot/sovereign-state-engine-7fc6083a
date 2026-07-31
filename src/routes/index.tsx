@@ -489,7 +489,9 @@ function Index() {
       {mode === "PAPER_TESTNET" && cycle && (
         <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest space-y-1">
           <div className="flex flex-wrap gap-x-6 gap-y-1">
-            <span className="text-emerald-400">PAPER BROKER · LIVE TICKS · NO BROKER CALLS</span>
+            <span className="text-emerald-400">
+              PAPER BROKER · {sel?.label} · LIVE TICKS · NO BROKER CALLS
+            </span>
             <span className="text-zinc-400">
               TRADES: <span className="text-zinc-200">{cycle.broker.trades}</span>
             </span>
@@ -507,6 +509,17 @@ function Index() {
               <span className={cycle.broker.cumPnL >= 0 ? "text-emerald-400" : "text-red-400"}>
                 {cycle.broker.cumPnL >= 0 ? "+" : ""}
                 {cycle.broker.cumPnL.toFixed(4)} USDT
+              </span>
+            </span>
+            <span className="text-zinc-400">
+              UNREALIZED:{" "}
+              <span
+                className={
+                  (sel?.unrealizedPnL ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                }
+              >
+                {(sel?.unrealizedPnL ?? 0) >= 0 ? "+" : ""}
+                {(sel?.unrealizedPnL ?? 0).toFixed(4)} USDT
               </span>
             </span>
           </div>
