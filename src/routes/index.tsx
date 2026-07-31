@@ -263,6 +263,148 @@ function Index() {
           SYSTEM STANDBY — SELECT FEED MODE ABOVE
         </div>
       )}
+      {mode === "PAPER_TESTNET" && (
+        <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
+          {MARKETS.map((m) => {
+            const snap = markets.find((s) => s.symbol === m.symbol);
+            const active = selected === m.symbol;
+            const open = snap?.cycle?.broker.openPosition ?? null;
+            return (
+              <button
+                key={m.symbol}
+                type="button"
+                onClick={() => setSelected(m.symbol)}
+                className={`px-3 py-2 border transition-colors ${
+                  active
+                    ? "border-emerald-700 text-emerald-300 bg-emerald-950/40"
+                    : "border-zinc-800 text-zinc-500 hover:bg-zinc-900"
+                }`}
+              >
+                {m.base}
+                <span
+                  className={
+                    open
+                      ? open.side === "long"
+                        ? " text-emerald-400"
+                        : " text-red-400"
+                      : " text-zinc-700"
+                  }
+                >
+                  {" "}
+                  {open ? (open.side === "long" ? "▲" : "▼") : "·"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {mode === "PAPER_TESTNET" && (
+        <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest overflow-x-auto">
+          <div className="text-zinc-500 mb-2">MARKET OVERVIEW · INDEPENDENT ENGINES</div>
+          <table className="w-full min-w-[720px] text-left">
+            <thead className="text-zinc-600">
+              <tr>
+                <th className="py-1 pr-3 font-normal">MARKET</th>
+                <th className="py-1 pr-3 font-normal">POSITION</th>
+                <th className="py-1 pr-3 font-normal">AUTHORITY</th>
+                <th className="py-1 pr-3 font-normal">FUSION</th>
+                <th className="py-1 pr-3 font-normal">OPEN</th>
+                <th className="py-1 pr-3 font-normal">W</th>
+                <th className="py-1 pr-3 font-normal">L</th>
+                <th className="py-1 pr-3 font-normal">REALIZED</th>
+                <th className="py-1 pr-3 font-normal">UNREALIZED</th>
+              </tr>
+            </thead>
+            <tbody>
+              {markets.map((m) => {
+                const b = m.cycle?.broker;
+                const pos = b?.openPosition ?? null;
+                const report = m.cycle?.report;
+                const authority = report
+                  ? report.failedAt
+                    ? "VETO"
+                    : report.tradeArmed
+                      ? "ARMED"
+                      : "STANDBY"
+                  : m.connected
+                    ? "WARMING"
+                    : "OFFLINE";
+                return (
+                  <tr
+                    key={m.symbol}
+                    onClick={() => setSelected(m.symbol)}
+                    className={`cursor-pointer border-t border-zinc-900 ${
+                      selected === m.symbol ? "bg-zinc-900/60" : "hover:bg-zinc-900/30"
+                    }`}
+                  >
+                    <td className="py-1 pr-3 text-zinc-200">{m.label}</td>
+                    <td className="py-1 pr-3">
+                      {pos ? (
+                        <span
+                          className={
+                            pos.side === "long" ? "text-emerald-400" : "text-red-400"
+                          }
+                        >
+                          {pos.side.toUpperCase()} @ {pos.entry.toFixed(4)}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600">FLAT</span>
+                      )}
+                    </td>
+                    <td
+                      className={`py-1 pr-3 ${
+                        authority === "ARMED"
+                          ? "text-emerald-400"
+                          : authority === "VETO"
+                            ? "text-red-400"
+                            : "text-amber-400"
+                      }`}
+                    >
+                      {authority}
+                    </td>
+                    <td
+                      className={`py-1 pr-3 ${
+                        m.fusion.verdict === "LOCKED-BULL"
+                          ? "text-emerald-400"
+                          : m.fusion.verdict === "LOCKED-BEAR"
+                            ? "text-red-400"
+                            : m.fusion.verdict === "SPLIT"
+                              ? "text-amber-300"
+                              : "text-zinc-600"
+                      }`}
+                    >
+                      {m.fusion.verdict}
+                    </td>
+                    <td className="py-1 pr-3 text-zinc-300">{pos ? 1 : 0}</td>
+                    <td className="py-1 pr-3 text-emerald-400">{b?.wins ?? 0}</td>
+                    <td className="py-1 pr-3 text-red-400">{b?.losses ?? 0}</td>
+                    <td
+                      className={`py-1 pr-3 ${
+                        (b?.cumPnL ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                      }`}
+                    >
+                      {(b?.cumPnL ?? 0) >= 0 ? "+" : ""}
+                      {(b?.cumPnL ?? 0).toFixed(4)}
+                    </td>
+                    <td
+                      className={`py-1 pr-3 ${
+                        m.unrealizedPnL > 0
+                          ? "text-emerald-400"
+                          : m.unrealizedPnL < 0
+                            ? "text-red-400"
+                            : "text-zinc-600"
+                      }`}
+                    >
+                      {m.unrealizedPnL >= 0 ? "+" : ""}
+                      {m.unrealizedPnL.toFixed(4)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       {!standby && mirror && fusion && (
         <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest space-y-1">
           <div className="flex flex-wrap gap-x-6 gap-y-1">
