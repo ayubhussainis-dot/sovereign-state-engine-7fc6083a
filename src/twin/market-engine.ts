@@ -17,6 +17,7 @@ import { fuseFrame, fusionBlocker, type Fusion } from "./fusion";
 import { PaperHarness, type HarnessCycle } from "./paper-harness";
 import type { PaperTrade } from "./paper-broker";
 import type { RiskContext } from "@/soall/types";
+import type { MC01State } from "../mc01/state-engine";
 
 export interface MarketSnapshot {
   symbol: string;
@@ -26,6 +27,7 @@ export interface MarketSnapshot {
   cycle: HarnessCycle | null;
   fusion: Fusion;
   frame: MirrorFrame;
+  mc01: MC01State;
   /** Mark-to-market PnL of the open position, in USDT. 0 when flat. */
   unrealizedPnL: number;
   blockedBy: string | null;
@@ -35,8 +37,8 @@ export interface MarketSnapshot {
 
 export class MarketEngine {
   private readonly mc01 = new MC01StateEngine();
-private readonly joall = new JOALLTranslator();  
-readonly symbol: string;
+  private readonly joall = new JOALLTranslator();
+  readonly symbol: string;
   readonly label: string;
   readonly base: string;
   readonly harness: PaperHarness;
@@ -62,6 +64,7 @@ readonly symbol: string;
     if (this.active) return;
     this.active = true;
     const m = getMirror(this.symbol);
+    console.info(`[MarketEngine] ${this.symbol} subscribing to mirror`);
     this.mirror.unsub = m.subscribe((f) => this.onFrame(f));
   }
 
@@ -75,7 +78,6 @@ readonly symbol: string;
     this.harness.reset();
     this.cycle = null;
     this.ticks = 0;
-    this.mc01.update(joallState);
     this.lastIngestedAt = 0;
     this.blockedBy = null;
   }
@@ -85,9 +87,9 @@ readonly symbol: string;
     if (!f.lastPrice || f.lastTradeAt === this.lastIngestedAt) return;
     this.lastIngestedAt = f.lastTradeAt;
 
-      const fusion = fuseFrame(f);
-      const joallState = this.joall.translate(f);    
-      const cycle = this.harness.ingest({
+    const fusion = fuseFrame(f);
+    this.mc01.update(this.joall.translate(f));
+    const cycle = this.harness.ingest({
       price: f.lastPrice,
       volume: f.lastQty,
       ts: f.lastEventTs || f.lastTradeAt,
@@ -115,6 +117,11 @@ readonly symbol: string;
     });
     this.cycle = cycle;
     this.ticks++;
+    if (this.ticks === 1) {
+      console.info(
+        `[MarketEngine] ${this.symbol} FIRST LIVE TICK @ ${f.lastPrice}`,
+      );
+    }
     const block = [...cycle.entries]
       .reverse()
       .find((e) => e.kind === "EXEC_BLOCK");
@@ -133,15 +140,15 @@ readonly symbol: string;
           ? (mark - pos.entry) * pos.qty
           : (pos.entry - mark) * pos.qty
         : 0;
-      return {
-    symbol: this.symbol,
-    label: this.label,
-    base: this.base,
-    connected: frame.connected,
-    cycle: this.cycle,
-    fusion,
-    mc01: this.mc01.getState(),
-     frame: frame,
+    return {
+      symbol: this.symbol,
+      label: this.label,
+      base: this.base,
+      connected: frame.connected,
+      cycle: this.cycle,
+      fusion,
+      mc01: this.mc01.getState(),
+      frame,
       unrealizedPnL,
       blockedBy: this.blockedBy,
       trades: this.harness.broker.recent(20),
