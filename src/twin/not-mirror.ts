@@ -77,40 +77,35 @@ export class BinanceMirror {
     this.connect();
   }
 
-  private connect() {console.log("[Mirror] Connecting...");
+  private attempts = 0;
+
+  private connect() {
+    this.attempts++;
+    console.info(
+      `[Mirror] ${this.pair} connecting (attempt ${this.attempts}) → ${streamUrl(this.pair)}`,
+    );
     try {
       this.ws = new WebSocket(streamUrl(this.pair));
-    } catch {
+    } catch (err) {
+      console.error(`[Mirror] ${this.pair} socket construction failed`, err);
       this.scheduleReconnect();
       return;
     }
     this.ws.onopen = () => {
-    console.log("[Mirror] Connected");
-    this.reconnectDelay = 1000;
-    this.frame.connected = true;
-    this.emit();
-};
-this.ws.onopen = () => {
+      console.info(`[Mirror] ${this.pair} connected`);
       this.reconnectDelay = 1000;
+      this.attempts = 0;
       this.frame.connected = true;
       this.emit();
     };
     this.ws.onclose = () => {
-    console.log("[Mirror] Closed");
-    this.frame.connected = false;
-    this.emit();
-    this.scheduleReconnect();
-};
-this.ws.onclose = () => {
+      console.warn(`[Mirror] ${this.pair} closed — scheduling reconnect`);
       this.frame.connected = false;
       this.emit();
       this.scheduleReconnect();
     };
     this.ws.onerror = () => {
-    console.log("[Mirror] Error");
-    try { this.ws?.close(); } catch {}
-};
-this.ws.onerror = () => {
+      console.error(`[Mirror] ${this.pair} socket error`);
       try { this.ws?.close(); } catch { /* noop */ }
     };
     this.ws.onmessage = (ev) => this.handle(ev.data);
@@ -120,6 +115,7 @@ this.ws.onerror = () => {
     this.ws = null;
     const d = Math.min(this.reconnectDelay, 15000);
     this.reconnectDelay = Math.min(d * 2, 15000);
+    console.info(`[Mirror] ${this.pair} reconnect in ${d}ms`);
     setTimeout(() => this.connect(), d);
   }
 
@@ -170,6 +166,9 @@ this.ws.onerror = () => {
       const flowImbalance = Math.max(-1, Math.min(1, this.flowEma / scale));
       const eventMs = Number(d.E ?? d.T ?? nowMs);
       const latencyMs = Math.max(0, nowMs - eventMs);
+      if (this.frame.lastTradeAt === 0) {
+        console.info(`[Mirror] ${this.pair} FIRST TICK @ ${price}`);
+      }
       this.frame = {
         ...this.frame,
         orderFlow: Math.max(0, Math.min(160, 80 + flowImbalance * 80)),
