@@ -10,7 +10,8 @@
  * accumulator. A trade on one market can never touch another because no
  * mutable state is shared between instances.
  */
-
+import { JOALLTranslator } from "../joall/translator";
+import { MC01StateEngine } from "../mc01/state-engine";
 import { getMirror, type MirrorFrame } from "./not-mirror";
 import { fuseFrame, fusionBlocker, type Fusion } from "./fusion";
 import { PaperHarness, type HarnessCycle } from "./paper-harness";
@@ -33,7 +34,9 @@ export interface MarketSnapshot {
 }
 
 export class MarketEngine {
-  readonly symbol: string;
+  private readonly mc01 = new MC01StateEngine();
+private readonly joall = new JOALLTranslator();  
+readonly symbol: string;
   readonly label: string;
   readonly base: string;
   readonly harness: PaperHarness;
@@ -72,6 +75,7 @@ export class MarketEngine {
     this.harness.reset();
     this.cycle = null;
     this.ticks = 0;
+    this.mc01.update(joallState);
     this.lastIngestedAt = 0;
     this.blockedBy = null;
   }
@@ -81,8 +85,9 @@ export class MarketEngine {
     if (!f.lastPrice || f.lastTradeAt === this.lastIngestedAt) return;
     this.lastIngestedAt = f.lastTradeAt;
 
-    const fusion = fuseFrame(f);
-    const cycle = this.harness.ingest({
+      const fusion = fuseFrame(f);
+      const joallState = this.joall.translate(f);    
+      const cycle = this.harness.ingest({
       price: f.lastPrice,
       volume: f.lastQty,
       ts: f.lastEventTs || f.lastTradeAt,
@@ -128,14 +133,15 @@ export class MarketEngine {
           ? (mark - pos.entry) * pos.qty
           : (pos.entry - mark) * pos.qty
         : 0;
-    return {
-      symbol: this.symbol,
-      label: this.label,
-      base: this.base,
-      connected: frame.connected,
-      cycle: this.cycle,
-      fusion,
-      frame,
+      return {
+    symbol: this.symbol,
+    label: this.label,
+    base: this.base,
+    connected: frame.connected,
+    cycle: this.cycle,
+    fusion,
+    mc01: this.mc01.getState(),
+     frame: frame,
       unrealizedPnL,
       blockedBy: this.blockedBy,
       trades: this.harness.broker.recent(20),

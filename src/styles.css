@@ -4,9 +4,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/*
+ /*
  * Design system definition.
  *
+   filter: drop-shadow(0 0 18px rgba(50, 255, 180, 1)) drop-shadow(0 0 35px rgba(0, 255, 102, 0.8));    opacity: 1;
+
  * The @theme inline block maps CSS custom properties to Tailwind utility
  * classes (e.g. --color-primary -> bg-primary, text-primary).
  *
@@ -17,6 +19,23 @@
  * 1. Add the variable to :root (light value) and .dark (dark value)
  * 2. Register it in @theme inline as --color-<name>: var(--<name>)
  */
+ 
+
+@keyframes neonPulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(0, 255, 102, 0.8)) drop-shadow(0 0 25px rgba(0, 255, 102, 0.4));
+    opacity: 0.85;
+  }
+  50% {
+    filter: drop-shadow(0 0 18px rgba(50, 255, 180, 1)) drop-shadow(0 0 35px rgba(0, 255, 102, 0.8));
+    opacity: 1;
+  }
+}
+
+.glow-neon-x {
+  animation: neonPulse 2s infinite ease-in-out;
+  color: #00ff66;
+}
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);

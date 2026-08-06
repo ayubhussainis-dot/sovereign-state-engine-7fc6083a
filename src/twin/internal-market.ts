@@ -10,7 +10,7 @@
  * `InternalMarket` produces identical snapshots.
  */
 
-import { normalizeTick } from "./ingress";
+import { kick } from "./ingress";
 import type { LiveTick, TwinSnapshot, TwinTick } from "./types";
 
 export interface InternalMarketOptions {
@@ -28,7 +28,7 @@ export class InternalMarket {
   }
 
   append(live: LiveTick): TwinTick {
-    const tick = normalizeTick(live, { twinSeq: this.nextSeq++ });
+    const tick = kick(live, { twinSeq: this.nextSeq++ });
     this.buf.push(tick);
     if (this.buf.length > this.capacity) this.buf.shift();
     return tick;

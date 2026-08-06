@@ -1,0 +1,11 @@
+{
+  "name": "sovereign-state-engine",
+  "compatibility_date": "2026-08-06",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "my-cirkuz",
+      "database_id": "5b27c551-35d8-4b9e-90bb-8530ae6abf26"
+    }
+  ]
+}

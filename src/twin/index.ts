@@ -1,4 +1,4 @@
 export * from "./types";
-export { normalizeTick } from "./ingress";
+export { kick } from "./ingress";
 export { InternalMarket } from "./internal-market";
 export { measureMirror } from "./mirror";

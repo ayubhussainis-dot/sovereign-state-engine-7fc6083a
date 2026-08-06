@@ -6,6 +6,7 @@ import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useMarkets } from "@/hooks/use-markets";
 import { MARKETS, getEngine } from "@/twin/markets";
+import EngineClock from "@/components/EngineClock";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -140,7 +141,9 @@ function Index() {
 
   return (
     <main className="min-h-screen bg-black flex flex-col items-center justify-center gap-4 p-4">
-      <RihalDashboard
+     <EngineClock />
+    
+        <RihalDashboard
         currentState={state}
         telemetry={telemetry}
         zScore={zScore}

@@ -1,9 +1,12 @@
-/**
- * Twin Ingress — normalizes a `LiveTick` into an authoritative `TwinTick`.
+ /**
+ * JOALL Ingress
  *
- * Deterministic · Pure · No side effects · No external deps · Replay safe.
- * The monotonic twin sequence is supplied by the caller (see
- * `InternalMarket.append`); ingress itself does not mutate state.
+ * Every market Tick becomes one internal Kick.
+ * A Kick is the heartbeat of the JOALL Mirror.
+ * The Kick creates the next Twin state.
+ *
+ * The real market remains external.
+ * JOALL only evolves its own mirrored world.
  */
 
 import type { LiveTick, TwinSide, TwinTick } from "./types";
@@ -23,7 +26,7 @@ function normalizeSide(input: LiveTick): TwinSide {
   return "unknown";
 }
 
-export function normalizeTick(input: LiveTick, opts: IngressOptions): TwinTick {
+export function kick(input: LiveTick, opts: IngressOptions): TwinTick {
   return {
     twinSeq: opts.twinSeq,
     ts: input.ts,

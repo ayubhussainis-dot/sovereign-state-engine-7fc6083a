@@ -114,7 +114,7 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
           </div>
         </div>
 
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-5 text-center text-[10px] tracking-widest text-zinc-500">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-5 text-center text-[10px] tracking-widest glow-neon-x text-zinc-500 glow-neon-x">
           GEOMETRIC ZERO HUB [A = 0]
         </div>
 

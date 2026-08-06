@@ -77,7 +77,7 @@ export class BinanceMirror {
     this.connect();
   }
 
-  private connect() {
+  private connect() {console.log("[Mirror] Connecting...");
     try {
       this.ws = new WebSocket(streamUrl(this.pair));
     } catch {
@@ -85,16 +85,32 @@ export class BinanceMirror {
       return;
     }
     this.ws.onopen = () => {
+    console.log("[Mirror] Connected");
+    this.reconnectDelay = 1000;
+    this.frame.connected = true;
+    this.emit();
+};
+this.ws.onopen = () => {
       this.reconnectDelay = 1000;
       this.frame.connected = true;
       this.emit();
     };
     this.ws.onclose = () => {
+    console.log("[Mirror] Closed");
+    this.frame.connected = false;
+    this.emit();
+    this.scheduleReconnect();
+};
+this.ws.onclose = () => {
       this.frame.connected = false;
       this.emit();
       this.scheduleReconnect();
     };
     this.ws.onerror = () => {
+    console.log("[Mirror] Error");
+    try { this.ws?.close(); } catch {}
+};
+this.ws.onerror = () => {
       try { this.ws?.close(); } catch { /* noop */ }
     };
     this.ws.onmessage = (ev) => this.handle(ev.data);
