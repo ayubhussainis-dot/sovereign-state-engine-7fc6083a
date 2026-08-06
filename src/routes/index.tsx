@@ -180,6 +180,14 @@ function Index() {
           </span>
         </span>
         <span className="text-zinc-400">
+          LIVE TICKS:{" "}
+          {(sel?.ticks ?? 0) > 0 ? (
+            <span className="text-emerald-400">YES [{sel?.ticks}]</span>
+          ) : (
+            <span className="text-amber-400">NO</span>
+          )}
+        </span>
+        <span className="text-zinc-400">
           MARK (REST acct):{" "}
           {futures?.markPrice != null ? (
             <span className="text-emerald-400">{futures.markPrice.toFixed(2)}</span>
