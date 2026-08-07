@@ -268,6 +268,12 @@ function Index() {
             </button>
           </>
         )}
+        <Link
+          to="/journal"
+          className="px-3 py-2 border border-zinc-800 text-zinc-400 hover:bg-zinc-900 transition-colors"
+        >
+          TRADE LEDGER →
+        </Link>
       </div>
       {standby && (
         <div className="font-mono text-[10px] tracking-widest text-amber-500/80">
