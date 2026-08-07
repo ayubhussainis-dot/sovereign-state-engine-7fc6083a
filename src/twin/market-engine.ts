@@ -18,6 +18,21 @@ import { PaperHarness, type HarnessCycle } from "./paper-harness";
 import type { PaperTrade } from "./paper-broker";
 import type { RiskContext } from "@/soall/types";
 import type { MC01State } from "../mc01/state-engine";
+import { tradeLedger } from "@/lib/trade-ledger";
+
+interface EntryContext {
+  timestamp: number;
+  joallValue: number;
+  mc01State: string;
+  eyeEnergy: number;
+  reasonEntry: string;
+}
+
+function mc01Label(s: MC01State): string {
+  const dir =
+    s.bullish > s.bearish ? "BULL" : s.bearish > s.bullish ? "BEAR" : "NEUTRAL";
+  return `${dir} dom=${s.dominance.toFixed(1)} conf=${s.confidence.toFixed(2)}`;
+}
 
 export interface MarketSnapshot {
   symbol: string;
@@ -48,6 +63,7 @@ export class MarketEngine {
   private cycle: HarnessCycle | null = null;
   private ticks = 0;
   private blockedBy: string | null = null;
+  private readonly entryContext = new Map<number, EntryContext>();
 
   constructor(symbol: string, base: string) {
     this.symbol = symbol;
@@ -80,6 +96,7 @@ export class MarketEngine {
     this.ticks = 0;
     this.lastIngestedAt = 0;
     this.blockedBy = null;
+    this.entryContext.clear();
   }
 
   private onFrame(f: MirrorFrame) {
@@ -126,6 +143,56 @@ export class MarketEngine {
       .reverse()
       .find((e) => e.kind === "EXEC_BLOCK");
     this.blockedBy = block ? String(block.payload.blockedBy) : null;
+    this.journal(cycle, fusion);
+  }
+
+  /**
+   * Mirror real broker fills/closes into the permanent trade ledger.
+   * Driven only by audit entries the PaperBroker actually produced.
+   */
+  private journal(cycle: HarnessCycle, fusion: ReturnType<typeof fuseFrame>) {
+    for (const e of cycle.entries) {
+      if (e.kind === "ORDER_FILLED") {
+        const id = Number(e.payload.id);
+        const composite = Math.min(1, Math.max(0, cycle.report.compositeScore));
+        const eyeEnergy =
+          Math.tanh(
+            Math.abs(cycle.ppg.ofi.value) + Math.abs(cycle.ppg.velocity.value),
+          ) * 100;
+        this.entryContext.set(id, {
+          timestamp: e.ts,
+          joallValue: 1 + Math.round(9 * composite),
+          mc01State: mc01Label(this.mc01.getState()),
+          eyeEnergy: Number(eyeEnergy.toFixed(2)),
+          reasonEntry:
+            `FUSION ${fusion.verdict} · composite ${composite.toFixed(3)}` +
+            ` · wave ${cycle.ppg.wave.state} · agreement ${fusion.agreement.toFixed(2)}`,
+        });
+      } else if (e.kind === "TRADE_CLOSED") {
+        const id = Number(e.payload.id);
+        const ctx = this.entryContext.get(id);
+        this.entryContext.delete(id);
+        const side = String(e.payload.side);
+        const reason = String(e.payload.reason);
+        const exit = Number(e.payload.exit);
+        tradeLedger.append({
+          id: `${this.symbol}-${id}-${e.ts}`,
+          timestamp: ctx?.timestamp ?? e.ts,
+          closedAt: e.ts,
+          symbol: this.symbol,
+          direction: side === "long" ? "BUY" : "SELL",
+          entryPrice: Number(e.payload.entry),
+          exitPrice: exit,
+          quantity: Number(e.payload.qty),
+          pnl: Number(e.payload.pnl),
+          joallValue: ctx?.joallValue ?? 0,
+          mc01State: ctx?.mc01State ?? "UNKNOWN",
+          eyeEnergy: ctx?.eyeEnergy ?? 0,
+          reasonEntry: ctx?.reasonEntry ?? "UNRECORDED",
+          reasonExit: `${reason} HIT @ ${exit.toFixed(2)}`,
+        });
+      }
+    }
   }
 
   snapshot(): MarketSnapshot {
