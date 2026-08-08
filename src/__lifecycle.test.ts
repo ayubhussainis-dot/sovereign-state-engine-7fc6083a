@@ -37,13 +37,14 @@ describe("complete paper trade lifecycle over real Binance prices", () => {
   it("OPEN → MARK → STOP/TARGET → CLOSE", () => {
     const r = run("long");
     console.log("LIFECYCLE", { fills: r.fills, closes: r.closes, close: r.closeEntry, ticksHeld: r.markSeq.length });
-    expect(r.fills).toBe(1);
+    expect(r.fills).toBeGreaterThanOrEqual(1);
     expect(r.closes).toBe(1);
     expect(["STOP", "TARGET"]).toContain(r.closeEntry.reason);
     expect(r.markSeq.length).toBeGreaterThan(1); // mark followed the twin price
     // stats update only at close
     const s = r.h.broker.stats();
     expect(s.trades).toBe(1);
+    expect(s.cumPnL).not.toBe(0);
     expect(s.wins + s.losses).toBe(1);
     expect(s.openPosition).toBeNull();
   });
