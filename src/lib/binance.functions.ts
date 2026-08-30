@@ -1,12 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createHmac } from "crypto";
 
-/**
- * Binance USD-M Futures TESTNET — read-only telemetry bridge.
- * Base: https://testnet.binancefuture.com
- * Secrets consumed inside the handler only (never at module scope,
- * never on the client, never in the worker bundle).
- */
 const FAPI_BASE = "https://testnet.binancefuture.com";
 
 function sign(query: string, secret: string): string {
@@ -24,6 +18,11 @@ export interface FuturesTelemetrySnapshot {
   ts: number;
 }
 
+const COMMON_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "application/json",
+};
+
 export const getFuturesTelemetry = createServerFn({ method: "GET" })
   .validator((input: { symbol?: string }) => ({
     symbol: (input?.symbol ?? "BTCUSDT").toUpperCase(),
@@ -35,15 +34,13 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
       throw new Error("Binance testnet credentials not configured");
     }
 
-    // Public feed (may be geo/IP-blocked from serverless egress → 403).
-    // We tolerate failure and let the browser WebSocket provide price.
     let lastPrice: number | null = null;
     let markPrice: number | null = null;
     let publicFeedError: string | undefined;
     try {
       const [markRes, tickerRes] = await Promise.all([
-        fetch(`${FAPI_BASE}/fapi/v1/premiumIndex?symbol=${data.symbol}`),
-        fetch(`${FAPI_BASE}/fapi/v1/ticker/price?symbol=${data.symbol}`),
+        fetch(`${FAPI_BASE}/fapi/v1/premiumIndex?symbol=${data.symbol}`, { headers: COMMON_HEADERS }),
+        fetch(`${FAPI_BASE}/fapi/v1/ticker/price?symbol=${data.symbol}`, { headers: COMMON_HEADERS }),
       ]);
       if (markRes.ok && tickerRes.ok) {
         const mark = (await markRes.json()) as { markPrice: string };
@@ -57,7 +54,6 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
       publicFeedError = err instanceof Error ? err.message : String(err);
     }
 
-    // Signed: account equity (READ-ONLY). Also tolerate failure.
     let totalWalletBalance: number | null = null;
     let totalMarginBalance: number | null = null;
     let accountError: string | undefined;
@@ -67,7 +63,12 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
       const signature = sign(query, apiSecret);
       const acctRes = await fetch(
         `${FAPI_BASE}/fapi/v2/account?${query}&signature=${signature}`,
-        { headers: { "X-MBX-APIKEY": apiKey } },
+        { 
+          headers: { 
+            ...COMMON_HEADERS,
+            "X-MBX-APIKEY": apiKey 
+          } 
+        },
       );
       if (acctRes.ok) {
         const acct = (await acctRes.json()) as {
