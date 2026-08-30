@@ -2,7 +2,7 @@ import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 
 interface RihalDashboardProps {
   currentState: SDTState;
-  telemetry: TelemetryData;
+  telemetry: TelemetryData & { edartradeSignal?: string | null };
   zScore: number;
   sMultiplier: number;
 }
@@ -40,6 +40,17 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
             {currentState}
           </span>
         </div>
+      </div>
+
+      {/* EDARTRADE Engine Signal Banner */}
+      <div className="mb-6 bg-zinc-950 border border-zinc-800 p-3 flex items-center justify-between text-xs">
+        <span className="text-zinc-400 font-bold flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          EDARTRADE MOMENTUM PULSE:
+        </span>
+        <span className="text-emerald-300 font-mono tracking-wide">
+          {telemetry.edartradeSignal || "MONITORING TICK ACCELERATION (PCM '1')..."}
+        </span>
       </div>
 
       <div className="relative h-96 bg-zinc-950/40 border border-zinc-900 flex items-center justify-center overflow-hidden">
@@ -109,12 +120,12 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
           <div>
             OFI Velocity:{" "}
             <span className="font-bold text-zinc-200">
-              {telemetry.currentOfi.toFixed(0)}
+              {(telemetry.currentOfi ?? 0).toFixed(0)}
             </span>
           </div>
         </div>
 
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-5 text-center text-[10px] tracking-widest glow-neon-x text-zinc-500 glow-neon-x">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-5 text-center text-[10px] tracking-widest text-zinc-500">
           GEOMETRIC ZERO HUB [A = 0]
         </div>
 
@@ -129,7 +140,7 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
           <div>
             Tensegrity Struts:{" "}
             <span className="font-bold text-zinc-200">
-              {(telemetry.liquidityDepth / (telemetry.volatility || 1)).toFixed(2)}
+              {((telemetry.liquidityDepth ?? 0) / ((telemetry.volatility ?? 0) || 1)).toFixed(2)}
             </span>
           </div>
         </div>
@@ -139,13 +150,13 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         <div className="bg-zinc-900/40 p-3 border border-zinc-800">
           <span className="text-[10px] text-zinc-500 block">COMPRESSION STRUTS (DEPTH)</span>
           <span className="text-sm font-bold text-zinc-200">
-            {telemetry.liquidityDepth.toLocaleString()}
+            {(telemetry.liquidityDepth ?? 0).toLocaleString()}
           </span>
         </div>
         <div className="bg-zinc-900/40 p-3 border border-zinc-800">
           <span className="text-[10px] text-zinc-500 block">TENSION CABLES (VOLATILITY)</span>
           <span className="text-sm font-bold text-zinc-200">
-            {telemetry.volatility.toFixed(4)}
+            {(telemetry.volatility ?? 0).toFixed(4)}
           </span>
         </div>
         <div className="bg-zinc-900/40 p-3 border border-zinc-800">
