@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { createHmac } from "crypto";
 import { EDARTRADEEngine } from "./edartrade.engine";
 
-const FAPI_BASE = "https://testnet.binancefuture.com";
+const FAPI_BASE = "https://demo-fapi.binance.com";
 
 // Initialize the EDARTRADE engine instance with default parameters
 const edarTrader = new EDARTRADEEngine(78000.0, 0.02, 0.01);
@@ -39,8 +39,6 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
       }
     }
 
-    // Bypass server-side REST fetching if blocked by CloudFront datacenter IP,
-    // allowing the browser WebSocket to drive live telemetry seamlessly.
     return {
       symbol: data.symbol,
       lastPrice: data.currentPrice ?? null,
@@ -66,6 +64,7 @@ export const executeDirectOrder = createServerFn({ method: "POST" })
         method: "POST",
         headers: {
           "X-MBX-APIKEY": data.apiKey,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         },
       });
 
@@ -74,7 +73,7 @@ export const executeDirectOrder = createServerFn({ method: "POST" })
       try {
         result = JSON.parse(text);
       } catch {
-        return { error: `Binance API error (HTTP ${response.status}): ${text.slice(0, 200)}` };
+        return { error: `Binance WAF Block (HTTP ${response.status}): ${text.slice(0, 150)}` };
       }
 
       if (!response.ok) {
