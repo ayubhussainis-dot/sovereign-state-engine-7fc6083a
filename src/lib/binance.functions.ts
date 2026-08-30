@@ -106,3 +106,42 @@ export const executeDirectOrder = createServerFn({ method: "POST" })
       };
     }
   });
+
+// --- NEW: Secure server-side position fetcher ---
+export const getActivePosition = createServerFn({ method: "GET" })
+  .validator((input: { symbol: string; apiKey: string; apiSecret: string }) => input)
+  .handler(async ({ data }) => {
+    if (!data.apiKey || !data.apiSecret) return null;
+    
+    try {
+      const timestamp = Date.now();
+      const queryString = `symbol=${data.symbol}&timestamp=${timestamp}`;
+      const signature = sign(queryString, data.apiSecret);
+
+      const response = await fetch(`${FAPI_BASE}/fapi/v2/positionRisk?${queryString}&signature=${signature}`, {
+        method: "GET",
+        headers: {
+          "X-MBX-APIKEY": data.apiKey,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+      });
+
+      if (!response.ok) return null;
+
+      const rawData = await response.json();
+      const position = Array.isArray(rawData) ? rawData.find((p: any) => p.symbol === data.symbol) : null;
+
+      if (!position) return null;
+
+      return {
+        hasPosition: parseFloat(position.positionAmt) !== 0,
+        positionAmt: parseFloat(position.positionAmt),
+        entryPrice: parseFloat(position.entryPrice),
+        unRealizedProfit: parseFloat(position.unRealizedProfit),
+        leverage: parseInt(position.leverage)
+      };
+    } catch (err) {
+      console.error("Backend Position Fetch Error:", err);
+      return null;
+    }
+  });
