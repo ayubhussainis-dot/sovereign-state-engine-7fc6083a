@@ -41,6 +41,10 @@ function Index() {
   const [zScore, setZScore] = useState(0);
   const [sMultiplier, setSMultiplier] = useState(0);
   const [decision, setDecision] = useState<Decision | null>(null);
+  
+  // --- NEW: State to hold the live payload position from the worker ---
+  const [positionMetrics, setPositionMetrics] = useState<any>(null);
+
   const workerRef = useRef<Worker | null>(null);
   const [futures, setFutures] = useState<FuturesTelemetrySnapshot | null>(null);
   const [futuresError, setFuturesError] = useState<string | null>(null);
@@ -115,6 +119,9 @@ function Index() {
         baseLeverage: 2,
         zScoreThreshold: 2.5,
       },
+      // --- NEW: Pass the saved keys to the worker so it can authorize the PnL fetch ---
+      apiKey,
+      apiSecret
     });
 
     worker.addEventListener("message", (ev: MessageEvent) => {
@@ -128,6 +135,10 @@ function Index() {
         setSMultiplier(msg.sMultiplier);
       } else if (msg.type === "DECISION") {
         setDecision(msg.decision as Decision);
+      } 
+      // --- NEW: Catch the payload position signal and save it to state ---
+      else if (msg.type === "POSITION") {
+        setPositionMetrics(msg.data);
       }
     });
 
@@ -202,6 +213,8 @@ function Index() {
         }}
         zScore={zScore}
         sMultiplier={sMultiplier}
+        // --- NEW: Pass the live state into the dashboard component ---
+        positionMetrics={positionMetrics} 
       />
 
       {/* Live Ticks & Pipeline Header */}
