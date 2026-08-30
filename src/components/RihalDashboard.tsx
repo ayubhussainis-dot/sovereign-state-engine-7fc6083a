@@ -1,10 +1,21 @@
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 
+// Define the shape of the incoming live position data
+export interface ActivePositionMetrics {
+  hasPosition: boolean;
+  positionAmt: number;
+  entryPrice: number;
+  unRealizedProfit: number;
+  leverage: number;
+}
+
 interface RihalDashboardProps {
   currentState: SDTState;
   telemetry: TelemetryData & { edartradeSignal?: string | null };
   zScore: number;
   sMultiplier: number;
+  // New prop to receive the live broker telemetry
+  positionMetrics?: ActivePositionMetrics | null; 
 }
 
 export const RihalDashboard: React.FC<RihalDashboardProps> = ({
@@ -12,6 +23,7 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
   telemetry,
   zScore,
   sMultiplier,
+  positionMetrics,
 }) => {
   const isArrested = currentState === "P53_ARREST";
 
@@ -155,8 +167,9 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         </div>
         <div className="bg-zinc-900/40 p-3 border border-zinc-800">
           <span className="text-[10px] text-zinc-500 block">TENSION CABLES (VOLATILITY)</span>
-          <span className="text-sm font-bold text-zinc-200">
-            {(telemetry.volatility ?? 0).toFixed(4)}
+          <span className="text-sm font-bold text-cyan-400">
+            {/* Kept bound to your telemetry object, falls back to 0.0200 if undefined */}
+            {(telemetry.volatility ?? 0.0200).toFixed(4)}
           </span>
         </div>
         <div className="bg-zinc-900/40 p-3 border border-zinc-800">
@@ -176,9 +189,50 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
             ACTIVE STRUCTURAL SYSTEM WEIGHT
           </span>
           <span className="text-sm font-bold text-amber-400">
-            {sMultiplier.toFixed(2)}x
+            {/* Live calculation replacing the 0.00x placeholder */}
+            {positionMetrics?.hasPosition 
+                ? `${(Math.abs(positionMetrics.positionAmt) * positionMetrics.leverage).toFixed(2)}x` 
+                : "0.00x"}
           </span>
         </div>
+      </div>
+
+      {/* --- ACTIVE PAYLOAD & PNL TRACKER --- */}
+      <div className="mt-6 border border-zinc-800 bg-zinc-950 p-4">
+        <div className="text-emerald-500 font-mono text-[10px] mb-3 tracking-widest uppercase flex items-center gap-2">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+            STRUCTURAL PAYLOAD TELEMETRY
+        </div>
+        
+        {positionMetrics?.hasPosition ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 font-mono text-xs">
+                <div className="border-l border-zinc-800 pl-2">
+                    <span className="text-zinc-500 block mb-1">DIRECTION</span> 
+                    <span className={positionMetrics.positionAmt > 0 ? "text-emerald-500" : "text-red-500"}>
+                        {positionMetrics.positionAmt > 0 ? "LONG [▲]" : "SHORT [▼]"}
+                    </span>
+                </div>
+                <div className="border-l border-zinc-800 pl-2">
+                    <span className="text-zinc-500 block mb-1">PAYLOAD MASS</span> 
+                    <span className="text-white">{Math.abs(positionMetrics.positionAmt)} BTC</span>
+                </div>
+                <div className="border-l border-zinc-800 pl-2">
+                    <span className="text-zinc-500 block mb-1">ENTRY ANCHOR</span> 
+                    <span className="text-white">${positionMetrics.entryPrice.toFixed(2)}</span>
+                </div>
+                <div className="border-l border-zinc-800 pl-2">
+                    <span className="text-zinc-500 block mb-1">DELTA [U.PNL]</span> 
+                    <span className={positionMetrics.unRealizedProfit >= 0 ? "text-emerald-500" : "text-red-500"}>
+                        {positionMetrics.unRealizedProfit >= 0 ? "+" : ""}
+                        {positionMetrics.unRealizedProfit.toFixed(4)} USDT
+                    </span>
+                </div>
+            </div>
+        ) : (
+            <div className="text-zinc-600 font-mono text-xs animate-pulse">
+                NO ACTIVE STRUCTURAL PAYLOAD ... AWAITING MOMENTUM PULSE
+            </div>
+        )}
       </div>
 
       <footer className="mt-6 pt-4 border-t border-zinc-900 text-[10px] text-zinc-600 text-center tracking-widest">
