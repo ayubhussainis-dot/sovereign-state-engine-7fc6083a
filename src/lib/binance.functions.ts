@@ -5,13 +5,12 @@ import { EDARTRADEEngine } from "./edartrade.engine";
 const FAPI_BASE = "https://demo-fapi.binance.com";
 const edarTrader = new EDARTRADEEngine(78000.0, 0.02, 0.01);
 
-// --- VIRTUAL POSITION STORAGE (Bypasses Binance Testnet WAF blocks) ---
-const activeVirtualPositions: Record<string, {
+// Server-side memory ledger to guarantee state tracking past WAF blocks
+const virtualLedger: Record<string, {
   side: "BUY" | "SELL";
   quantity: number;
   entryPrice: number;
   leverage: number;
-  timestamp: number;
 }> = {};
 
 function sign(query: string, secret: string): string {
@@ -41,15 +40,12 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
     if (data.currentPrice) {
       signal = edarTrader.ingestTick(data.currentPrice, ts);
     }
-
     return {
       symbol: data.symbol,
       lastPrice: data.currentPrice ?? null,
       markPrice: null,
       totalWalletBalance: null,
       totalMarginBalance: null,
-      publicFeedError: undefined,
-      accountError: undefined,
       edartradeSignal: signal,
       ts,
     };
@@ -60,13 +56,12 @@ export const executeDirectOrder = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const timestamp = Date.now();
     
-    // Open or flip the virtual position instantly
-    activeVirtualPositions[data.symbol] = {
+    // Register position instantly in the memory ledger
+    virtualLedger[data.symbol] = {
       side: data.side,
       quantity: data.quantity,
-      entryPrice: data.currentPrice ?? 78000, // Fallback price anchor
+      entryPrice: data.currentPrice ?? 78000,
       leverage: 2,
-      timestamp
     };
 
     return {
@@ -77,20 +72,19 @@ export const executeDirectOrder = createServerFn({ method: "POST" })
       status: "NEW",
       type: "MARKET",
       side: data.side,
-      note: "Executed via autonomous virtual twin ledger"
+      note: "Executed via autonomous twin ledger bypass"
     };
   });
 
 export const getActivePosition = createServerFn({ method: "GET" })
   .validator((input: { symbol: string; apiKey: string; apiSecret: string; currentPrice?: number }) => input)
   .handler(async ({ data }) => {
-    const pos = activeVirtualPositions[data.symbol];
+    const pos = virtualLedger[data.symbol];
     if (!pos) return null;
 
-    // Calculate real-time virtual PnL based on current market price
     const currentPrice = data.currentPrice ?? pos.entryPrice;
-    const priceDiff = pos.side === "BUY" ? (currentPrice - pos.entryPrice) : (pos.entryPrice - currentPrice);
-    const unRealizedProfit = priceDiff * pos.quantity;
+    const diff = pos.side === "BUY" ? (currentPrice - pos.entryPrice) : (pos.entryPrice - currentPrice);
+    const unRealizedProfit = diff * pos.quantity;
 
     return {
       hasPosition: true,
