@@ -53,3 +53,21 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
       ts,
     };
   });
+
+export const executeDirectOrder = createServerFn({ method: "POST" })
+  .validator((input: { symbol: string; side: "BUY" | "SELL"; quantity: number; apiKey: string; apiSecret: string }) => input)
+  .handler(async ({ data }) => {
+    const timestamp = Date.now();
+    const queryString = `symbol=${data.symbol}&side=${data.side}&type=MARKET&quantity=${data.quantity}&timestamp=${timestamp}`;
+    const signature = sign(queryString, data.apiSecret);
+
+    const response = await fetch(`${FAPI_BASE}/fapi/v1/order?${queryString}&signature=${signature}`, {
+      method: "POST",
+      headers: {
+        "X-MBX-APIKEY": data.apiKey,
+      },
+    });
+
+    const result = await response.json();
+    return result;
+  });
