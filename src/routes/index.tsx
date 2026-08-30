@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RihalDashboard } from "@/components/RihalDashboard";
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 import type { Decision } from "@/engine/decision/types";
-import { getFuturesTelemetry, executeDirectOrder, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
+import { getFuturesTelemetry, executeDirectOrder, getActivePosition, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useMarkets } from "@/hooks/use-markets";
 import { MARKETS } from "@/twin/markets";
 import EngineClock from "@/components/EngineClock";
@@ -27,45 +27,6 @@ export const Route = createFileRoute("/")({
 });
 
 type Mode = "STANDBY" | "SIMULATED" | "DIRECT_TESTNET";
-
-// --- NEW: Helper function to fetch live position directly on the main thread ---
-async function fetchLivePosition(symbol: string, key: string, secret: string) {
-  if (!key || !secret) return null;
-  try {
-    const endpoint = '/fapi/v2/positionRisk';
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-
-    const encoder = new TextEncoder();
-    const cryptoKey = await crypto.subtle.importKey(
-        'raw', encoder.encode(secret),
-        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-    );
-    const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(queryString));
-    const signature = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-
-    const url = `https://testnet.binancefuture.com${endpoint}?${queryString}&signature=${signature}`;
-
-    const res = await fetch(url, { headers: { 'X-MBX-APIKEY': key } });
-    if (!res.ok) return null;
-    
-    const data = await res.json();
-    const position = Array.isArray(data) ? data.find((p: any) => p.symbol === symbol) : null;
-    
-    if (!position) return null;
-
-    return {
-        hasPosition: parseFloat(position.positionAmt) !== 0,
-        positionAmt: parseFloat(position.positionAmt),
-        entryPrice: parseFloat(position.entryPrice),
-        unRealizedProfit: parseFloat(position.unRealizedProfit),
-        leverage: parseInt(position.leverage)
-    };
-  } catch (err) {
-    console.error("Direct Position Fetch Error:", err);
-    return null;
-  }
-}
 
 function Index() {
   const [state, setState] = useState<SDTState>("G0_HOMEOSTASIS");
@@ -110,21 +71,33 @@ function Index() {
   const mirror = sel?.frame;
   const fusion = sel?.fusion;
 
-  // --- NEW: Live Position Poller attached to the UI ---
+  // Polls the server-side position function every 2 seconds for whichever asset tab is selected
   useEffect(() => {
     if (mode !== "DIRECT_TESTNET" || !apiKey || !apiSecret) return;
     
     let active = true;
     const pollPosition = async () => {
-      // It now tracks whatever symbol you have clicked on!
-      const metrics = await fetchLivePosition(selected, apiKey, apiSecret);
-      if (active && metrics) {
-        setPositionMetrics(metrics);
+      try {
+        const metrics = await getActivePosition({
+          data: {
+            symbol: selected,
+            apiKey,
+            apiSecret
+          }
+        });
+        
+        if (active && metrics) {
+          setPositionMetrics(metrics);
+        } else if (active && !metrics) {
+          setPositionMetrics(null);
+        }
+      } catch (e) {
+        console.error("Failed to poll position", e);
       }
     };
 
-    pollPosition(); // Fire immediately on tab switch
-    const id = setInterval(pollPosition, 2000); // Update every 2 seconds
+    pollPosition(); 
+    const id = setInterval(pollPosition, 2000);
     
     return () => {
       active = false;
@@ -263,7 +236,7 @@ function Index() {
         }}
         zScore={zScore}
         sMultiplier={sMultiplier}
-        positionMetrics={positionMetrics} 
+        positionMetrics={positionMetrics}
       />
 
       {/* Live Ticks & Pipeline Header */}
