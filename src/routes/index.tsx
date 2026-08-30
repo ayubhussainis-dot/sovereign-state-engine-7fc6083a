@@ -5,7 +5,7 @@ import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 import type { Decision } from "@/engine/decision/types";
 import { getFuturesTelemetry, executeDirectOrder, type FuturesTelemetrySnapshot } from "@/lib/binance.functions";
 import { useMarkets } from "@/hooks/use-markets";
-import { MARKETS, getEngine } from "@/twin/markets";
+import { MARKETS } from "@/twin/markets";
 import EngineClock from "@/components/EngineClock";
 
 export const Route = createFileRoute("/")({
@@ -14,16 +14,11 @@ export const Route = createFileRoute("/")({
       { title: "J.O.ALL — Jack of All" },
       {
         name: "description",
-        content:
-          "J.O.ALL autonomous direct execution terminal — Market Digital Twin, PPG telemetry, and SOALL governance over Binance Futures Testnet.",
+        content: "J.O.ALL autonomous direct execution terminal — Market Digital Twin, PPG telemetry, and SOALL governance over Binance Futures Testnet.",
       },
       { name: "author", content: "Ayub Abdul Hussain — AYUBHUSSAINOID" },
       { property: "og:title", content: "J.O.ALL — Jack of All" },
-      {
-        property: "og:description",
-        content:
-          "Deterministic Market Digital Twin with autonomous p53 checkpoint governance and direct Binance Testnet execution handshake.",
-      },
+      { property: "og:description", content: "Deterministic Market Digital Twin with autonomous p53 checkpoint governance and direct Binance Testnet execution handshake." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -50,13 +45,21 @@ function Index() {
   const [futures, setFutures] = useState<FuturesTelemetrySnapshot | null>(null);
   const [futuresError, setFuturesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("BTCUSDT");
-  
-  // Direct execution credentials state & automation tracking
-  const [apiKey, setApiKey] = useState<string>("");
-  const [apiSecret, setApiSecret] = useState<string>("");
+
+  // Persistent Direct execution credentials using localStorage
+  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem("binance_testnet_key") ?? "");
+  const [apiSecret, setApiSecret] = useState<string>(() => localStorage.getItem("binance_testnet_secret") ?? "");
   const [executing, setExecuting] = useState<boolean>(false);
   const [execResult, setExecResult] = useState<any | null>(null);
   const [lastTriggeredVerdict, setLastTriggeredVerdict] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem("binance_testnet_key", apiKey);
+  }, [apiKey]);
+
+  useEffect(() => {
+    localStorage.setItem("binance_testnet_secret", apiSecret);
+  }, [apiSecret]);
 
   const markets = useMarkets(mode === "DIRECT_TESTNET");
   const sel = useMemo(
@@ -150,7 +153,7 @@ function Index() {
     };
   }, [mode]);
 
-  // Autonomous execution trigger watcher: fires automatically when fusion verdict locks
+  // Autonomous execution watcher
   useEffect(() => {
     if (mode !== "DIRECT_TESTNET" || !fusion || !apiKey || !apiSecret) return;
 
@@ -201,14 +204,13 @@ function Index() {
         sMultiplier={sMultiplier}
       />
 
+      {/* Live Ticks & Pipeline Header */}
       <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest flex flex-wrap gap-x-6 gap-y-1">
         <span className="text-zinc-500">BINANCE FUTURES TESTNET · {sel?.label ?? "—"}</span>
         <span className="text-zinc-400">
           TWIN LAST (pipeline):{" "}
           {cycle?.twin.last?.price != null ? (
-            <span className="text-emerald-400">
-              {cycle.twin.last.price.toFixed(2)}
-            </span>
+            <span className="text-emerald-400">{cycle.twin.last.price.toFixed(2)}</span>
           ) : (
             <span className="text-zinc-600">—</span>
           )}
@@ -221,8 +223,12 @@ function Index() {
             <span className="text-amber-400">—</span>
           )}
         </span>
+        <span className="text-zinc-400">
+          LIVE TICKS: {(sel?.ticks ?? 0) > 0 ? <span className="text-emerald-400">YES [{sel?.ticks}]</span> : <span className="text-amber-400">NO</span>}
+        </span>
       </div>
 
+      {/* Mode Selectors */}
       <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
         {(["STANDBY", "SIMULATED", "DIRECT_TESTNET"] as const).map((m) => {
           const active = mode === m;
@@ -241,15 +247,16 @@ function Index() {
                   : "border-zinc-800 text-zinc-500 hover:bg-zinc-900"
               }`}
             >
-              {m === "DIRECT_TESTNET" ? "AUTONOMOUS TESTNET EXECUTION" : m.replace("_", " ")}
+              {m === "DIRECT_TESTNET" ? "AUTONOMOUS DIRECT TESTNET" : m.replace("_", " ")}
             </button>
           );
         })}
       </div>
 
+      {/* Autonomous Handshake Panel with Saved Keys */}
       {mode === "DIRECT_TESTNET" && (
         <div className="w-full max-w-4xl border border-emerald-900/60 p-4 font-mono text-[10px] tracking-widest space-y-3 bg-zinc-950">
-          <div className="text-emerald-400 font-bold">AUTONOMOUS EXCHANGE HANDSHAKE [NO MANUAL CLICKS NEEDED]</div>
+          <div className="text-emerald-400 font-bold">AUTONOMOUS EXCHANGE HANDSHAKE [KEYS SAVED LOCALLY]</div>
           <div className="flex flex-col md:flex-row gap-2">
             <input
               type="text"
@@ -278,6 +285,7 @@ function Index() {
         </div>
       )}
 
+      {/* Symbol Selectors */}
       {mode === "DIRECT_TESTNET" && (
         <div className="w-full max-w-4xl flex flex-wrap gap-2 font-mono text-[10px] tracking-widest">
           {MARKETS.map((m) => {
@@ -300,6 +308,52 @@ function Index() {
         </div>
       )}
 
+      {/* Market Overview Table */}
+      {mode === "DIRECT_TESTNET" && (
+        <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest overflow-x-auto">
+          <div className="text-zinc-500 mb-2">MARKET OVERVIEW · INDEPENDENT ENGINES</div>
+          <table className="w-full min-w-[720px] text-left">
+            <thead className="text-zinc-600">
+              <tr>
+                <th className="py-1 pr-3 font-normal">MARKET</th>
+                <th className="py-1 pr-3 font-normal">AUTHORITY</th>
+                <th className="py-1 pr-3 font-normal">FUSION VERDICT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {markets.map((m) => {
+                return (
+                  <tr
+                    key={m.symbol}
+                    onClick={() => setSelected(m.symbol)}
+                    className={`cursor-pointer border-t border-zinc-900 ${
+                      selected === m.symbol ? "bg-zinc-900/60" : "hover:bg-zinc-900/30"
+                    }`}
+                  >
+                    <td className="py-1 pr-3 text-zinc-200">{m.label}</td>
+                    <td className="py-1 pr-3 text-emerald-400">ARMED</td>
+                    <td
+                      className={`py-1 pr-3 ${
+                        m.fusion.verdict === "LOCKED-BULL"
+                          ? "text-emerald-400"
+                          : m.fusion.verdict === "LOCKED-BEAR"
+                            ? "text-red-400"
+                            : m.fusion.verdict === "SPLIT"
+                              ? "text-amber-300"
+                              : "text-zinc-600"
+                      }`}
+                    >
+                      {m.fusion.verdict}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Two-Way Mirror Details */}
       {!standby && mirror && fusion && (
         <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest space-y-1">
           <div className="flex flex-wrap gap-x-6 gap-y-1">
@@ -320,4 +374,3 @@ function Index() {
     </main>
   );
 }
-
