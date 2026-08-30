@@ -28,6 +28,45 @@ export const Route = createFileRoute("/")({
 
 type Mode = "STANDBY" | "SIMULATED" | "DIRECT_TESTNET";
 
+// --- NEW: Helper function to fetch live position directly on the main thread ---
+async function fetchLivePosition(symbol: string, key: string, secret: string) {
+  if (!key || !secret) return null;
+  try {
+    const endpoint = '/fapi/v2/positionRisk';
+    const timestamp = Date.now();
+    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+
+    const encoder = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey(
+        'raw', encoder.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(queryString));
+    const signature = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const url = `https://testnet.binancefuture.com${endpoint}?${queryString}&signature=${signature}`;
+
+    const res = await fetch(url, { headers: { 'X-MBX-APIKEY': key } });
+    if (!res.ok) return null;
+    
+    const data = await res.json();
+    const position = Array.isArray(data) ? data.find((p: any) => p.symbol === symbol) : null;
+    
+    if (!position) return null;
+
+    return {
+        hasPosition: parseFloat(position.positionAmt) !== 0,
+        positionAmt: parseFloat(position.positionAmt),
+        entryPrice: parseFloat(position.entryPrice),
+        unRealizedProfit: parseFloat(position.unRealizedProfit),
+        leverage: parseInt(position.leverage)
+    };
+  } catch (err) {
+    console.error("Direct Position Fetch Error:", err);
+    return null;
+  }
+}
+
 function Index() {
   const [state, setState] = useState<SDTState>("G0_HOMEOSTASIS");
   const [mode, setMode] = useState<Mode>("DIRECT_TESTNET");
@@ -41,8 +80,6 @@ function Index() {
   const [zScore, setZScore] = useState(0);
   const [sMultiplier, setSMultiplier] = useState(0);
   const [decision, setDecision] = useState<Decision | null>(null);
-  
-  // --- NEW: State to hold the live payload position from the worker ---
   const [positionMetrics, setPositionMetrics] = useState<any>(null);
 
   const workerRef = useRef<Worker | null>(null);
@@ -50,7 +87,6 @@ function Index() {
   const [futuresError, setFuturesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("BTCUSDT");
 
-  // Persistent Direct execution credentials using localStorage
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem("binance_testnet_key") ?? "");
   const [apiSecret, setApiSecret] = useState<string>(() => localStorage.getItem("binance_testnet_secret") ?? "");
   const [executing, setExecuting] = useState<boolean>(false);
@@ -73,6 +109,28 @@ function Index() {
   const cycle = sel?.cycle ?? null;
   const mirror = sel?.frame;
   const fusion = sel?.fusion;
+
+  // --- NEW: Live Position Poller attached to the UI ---
+  useEffect(() => {
+    if (mode !== "DIRECT_TESTNET" || !apiKey || !apiSecret) return;
+    
+    let active = true;
+    const pollPosition = async () => {
+      // It now tracks whatever symbol you have clicked on!
+      const metrics = await fetchLivePosition(selected, apiKey, apiSecret);
+      if (active && metrics) {
+        setPositionMetrics(metrics);
+      }
+    };
+
+    pollPosition(); // Fire immediately on tab switch
+    const id = setInterval(pollPosition, 2000); // Update every 2 seconds
+    
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [mode, selected, apiKey, apiSecret]);
 
   useEffect(() => {
     if (mode === "STANDBY") return;
@@ -118,10 +176,7 @@ function Index() {
         currentEquity: 100000,
         baseLeverage: 2,
         zScoreThreshold: 2.5,
-      },
-      // --- NEW: Pass the saved keys to the worker so it can authorize the PnL fetch ---
-      apiKey,
-      apiSecret
+      }
     });
 
     worker.addEventListener("message", (ev: MessageEvent) => {
@@ -135,10 +190,6 @@ function Index() {
         setSMultiplier(msg.sMultiplier);
       } else if (msg.type === "DECISION") {
         setDecision(msg.decision as Decision);
-      } 
-      // --- NEW: Catch the payload position signal and save it to state ---
-      else if (msg.type === "POSITION") {
-        setPositionMetrics(msg.data);
       }
     });
 
@@ -164,7 +215,6 @@ function Index() {
     };
   }, [mode]);
 
-  // Autonomous execution watcher
   useEffect(() => {
     if (mode !== "DIRECT_TESTNET" || !fusion || !apiKey || !apiSecret) return;
 
@@ -213,7 +263,6 @@ function Index() {
         }}
         zScore={zScore}
         sMultiplier={sMultiplier}
-        // --- NEW: Pass the live state into the dashboard component ---
         positionMetrics={positionMetrics} 
       />
 
