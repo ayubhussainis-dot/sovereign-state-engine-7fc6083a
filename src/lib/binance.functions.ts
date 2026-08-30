@@ -57,17 +57,32 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
 export const executeDirectOrder = createServerFn({ method: "POST" })
   .validator((input: { symbol: string; side: "BUY" | "SELL"; quantity: number; apiKey: string; apiSecret: string }) => input)
   .handler(async ({ data }) => {
-    const timestamp = Date.now();
-    const queryString = `symbol=${data.symbol}&side=${data.side}&type=MARKET&quantity=${data.quantity}&timestamp=${timestamp}`;
-    const signature = sign(queryString, data.apiSecret);
+    try {
+      const timestamp = Date.now();
+      const queryString = `symbol=${data.symbol}&side=${data.side}&type=MARKET&quantity=${data.quantity}&timestamp=${timestamp}`;
+      const signature = sign(queryString, data.apiSecret);
 
-    const response = await fetch(`${FAPI_BASE}/fapi/v1/order?${queryString}&signature=${signature}`, {
-      method: "POST",
-      headers: {
-        "X-MBX-APIKEY": data.apiKey,
-      },
-    });
+      const response = await fetch(`${FAPI_BASE}/fapi/v1/order?${queryString}&signature=${signature}`, {
+        method: "POST",
+        headers: {
+          "X-MBX-APIKEY": data.apiKey,
+        },
+      });
 
-    const result = await response.json();
-    return result;
+      const text = await response.text();
+      let result;
+      try {
+        result = JSON.parse(text);
+      } catch {
+        return { error: `Binance API error (HTTP ${response.status}): ${text.slice(0, 200)}` };
+      }
+
+      if (!response.ok) {
+        return { error: result?.msg || `Binance returned status ${response.status}`, details: result };
+      }
+
+      return result;
+    } catch (err: any) {
+      return { error: err.message || String(err) };
+    }
   });
