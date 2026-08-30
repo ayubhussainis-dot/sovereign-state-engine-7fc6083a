@@ -56,6 +56,9 @@ export default {
         status: 500,
         headers: { "content-type": "text/html; charset=utf-8" },
       });
-    }
+    },
+
+  async scheduled(event: ScheduledEvent, env: any, ctx: ExecutionContext) {
+    console.log("Running background state evaluation engine...");
   },
 };
