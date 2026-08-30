@@ -64,7 +64,13 @@ function Index() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const snap = await getFuturesTelemetry({ data: { symbol: selected } });
+        const livePrice =
+          mirror && mirror.lastPrice > 0
+            ? mirror.lastPrice
+            : cycle?.twin.last?.price ?? telemetry.currentPrice;
+        const snap = await getFuturesTelemetry({
+          data: { symbol: selected, currentPrice: livePrice },
+        });
         if (!cancelled) {
           setFutures(snap);
           setFuturesError(null);
@@ -81,7 +87,7 @@ function Index() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [mode, selected]);
+  }, [mode, selected, mirror?.lastPrice, cycle?.twin.last?.price, telemetry.currentPrice]);
 
   useEffect(() => {
     const worker = new Worker(
@@ -141,11 +147,14 @@ function Index() {
 
   return (
     <main className="min-h-screen bg-black flex flex-col items-center justify-center gap-4 p-4">
-     <EngineClock />
-    
-        <RihalDashboard
+      <EngineClock />
+
+      <RihalDashboard
         currentState={state}
-        telemetry={telemetry}
+        telemetry={{
+          ...telemetry,
+          edartradeSignal: futures?.edartradeSignal,
+        }}
         zScore={zScore}
         sMultiplier={sMultiplier}
       />
