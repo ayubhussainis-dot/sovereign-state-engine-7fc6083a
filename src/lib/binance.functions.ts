@@ -3,7 +3,7 @@ import { createHmac } from "crypto";
 
 /**
  * Binance USD-M Futures TESTNET — read-only telemetry bridge.
- * Base: https://fapi.binance.com
+ * Base: https://testnet.binancefuture.com
  * Secrets consumed inside the handler only (never at module scope,
  * never on the client, never in the worker bundle).
  */
@@ -25,7 +25,7 @@ export interface FuturesTelemetrySnapshot {
 }
 
 export const getFuturesTelemetry = createServerFn({ method: "GET" })
-  .inputValidator((input: { symbol?: string }) => ({
+  .validator((input: { symbol?: string }) => ({
     symbol: (input?.symbol ?? "BTCUSDT").toUpperCase(),
   }))
   .handler(async ({ data }): Promise<FuturesTelemetrySnapshot> => {
@@ -82,9 +82,7 @@ export const getFuturesTelemetry = createServerFn({ method: "GET" })
     } catch (err) {
       accountError = err instanceof Error ? err.message : String(err);
     }
-    totalWalletBalance = null;
-    totalMarginBalance = null;
-    accountError = undefined;
+
     return {
       symbol: data.symbol,
       lastPrice,
