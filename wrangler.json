@@ -5,5 +5,9 @@
       "database_name": "my-cirkuz",
       "database_id": "d9ee3fdc-c091-41e4-85ba-d174cb534de2"
     }
-  ]
+  ],
+  "vars": {
+    "BINANCE_TESTNET_API_KEY": "YOUR_KEY_HERE",
+    "BINANCE_TESTNET_API_SECRET": "YOUR_SECRET_HERE"
+  }
 }
