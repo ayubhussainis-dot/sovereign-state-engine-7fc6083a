@@ -15,14 +15,14 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "J.O.ALL direct execution terminal — Market Digital Twin, PPG telemetry, and SOALL 8-gate governance over Binance Futures Testnet.",
+          "J.O.ALL autonomous direct execution terminal — Market Digital Twin, PPG telemetry, and SOALL governance over Binance Futures Testnet.",
       },
       { name: "author", content: "Ayub Abdul Hussain — AYUBHUSSAINOID" },
       { property: "og:title", content: "J.O.ALL — Jack of All" },
       {
         property: "og:description",
         content:
-          "Deterministic Market Digital Twin with p53 checkpoint governance and direct Binance Testnet execution handshake.",
+          "Deterministic Market Digital Twin with autonomous p53 checkpoint governance and direct Binance Testnet execution handshake.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -51,11 +51,12 @@ function Index() {
   const [futuresError, setFuturesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("BTCUSDT");
   
-  // Direct execution credentials state
+  // Direct execution credentials state & automation tracking
   const [apiKey, setApiKey] = useState<string>("");
   const [apiSecret, setApiSecret] = useState<string>("");
   const [executing, setExecuting] = useState<boolean>(false);
   const [execResult, setExecResult] = useState<any | null>(null);
+  const [lastTriggeredVerdict, setLastTriggeredVerdict] = useState<string | null>(null);
 
   const markets = useMarkets(mode === "DIRECT_TESTNET");
   const sel = useMemo(
@@ -149,11 +150,21 @@ function Index() {
     };
   }, [mode]);
 
-  const handleDirectTrade = async (side: "BUY" | "SELL") => {
-    if (!apiKey || !apiSecret) {
-      alert("Please enter your Binance Testnet API Key and Secret.");
-      return;
+  // Autonomous execution trigger watcher: fires automatically when fusion verdict locks
+  useEffect(() => {
+    if (mode !== "DIRECT_TESTNET" || !fusion || !apiKey || !apiSecret) return;
+
+    const verdict = fusion.verdict;
+    if (verdict === "LOCKED-BULL" && lastTriggeredVerdict !== "LOCKED-BULL") {
+      setLastTriggeredVerdict("LOCKED-BULL");
+      executeAutonomousOrder("BUY");
+    } else if (verdict === "LOCKED-BEAR" && lastTriggeredVerdict !== "LOCKED-BEAR") {
+      setLastTriggeredVerdict("LOCKED-BEAR");
+      executeAutonomousOrder("SELL");
     }
+  }, [fusion?.verdict, mode, apiKey, apiSecret, lastTriggeredVerdict, selected]);
+
+  const executeAutonomousOrder = async (side: "BUY" | "SELL") => {
     setExecuting(true);
     setExecResult(null);
     try {
@@ -161,12 +172,12 @@ function Index() {
         data: {
           symbol: selected,
           side,
-          quantity: 0.002, // Default test quantity
+          quantity: 0.002,
           apiKey,
           apiSecret,
         },
       });
-      setExecResult(res);
+      setExecResult({ timestamp: new Date().toISOString(), side, result: res });
     } catch (err: any) {
       setExecResult({ error: err.message });
     } finally {
@@ -230,7 +241,7 @@ function Index() {
                   : "border-zinc-800 text-zinc-500 hover:bg-zinc-900"
               }`}
             >
-              {m === "DIRECT_TESTNET" ? "DIRECT TESTNET EXECUTION" : m.replace("_", " ")}
+              {m === "DIRECT_TESTNET" ? "AUTONOMOUS TESTNET EXECUTION" : m.replace("_", " ")}
             </button>
           );
         })}
@@ -238,7 +249,7 @@ function Index() {
 
       {mode === "DIRECT_TESTNET" && (
         <div className="w-full max-w-4xl border border-emerald-900/60 p-4 font-mono text-[10px] tracking-widest space-y-3 bg-zinc-950">
-          <div className="text-emerald-400 font-bold">DIRECT EXCHANGE HANDSHAKE [NO BROKER MIDDLEMAN]</div>
+          <div className="text-emerald-400 font-bold">AUTONOMOUS EXCHANGE HANDSHAKE [NO MANUAL CLICKS NEEDED]</div>
           <div className="flex flex-col md:flex-row gap-2">
             <input
               type="text"
@@ -255,24 +266,9 @@ function Index() {
               className="flex-1 bg-black border border-zinc-800 p-2 text-zinc-200 focus:border-emerald-700 outline-none"
             />
           </div>
-          <div className="flex gap-4 items-center">
-            <button
-              type="button"
-              disabled={executing}
-              onClick={() => handleDirectTrade("BUY")}
-              className="px-4 py-2 bg-emerald-900/40 border border-emerald-700 text-emerald-300 hover:bg-emerald-900/60 transition-colors disabled:opacity-50"
-            >
-              {executing ? "EXECUTING..." : `DIRECT BUY (${selected})`}
-            </button>
-            <button
-              type="button"
-              disabled={executing}
-              onClick={() => handleDirectTrade("SELL")}
-              className="px-4 py-2 bg-red-900/40 border border-red-700 text-red-300 hover:bg-red-900/60 transition-colors disabled:opacity-50"
-            >
-              {executing ? "EXECUTING..." : `DIRECT SELL (${selected})`}
-            </button>
-            <span className="text-zinc-500">Target Symbol: {selected}</span>
+          <div className="text-zinc-400 flex items-center justify-between">
+            <span>Status: <span className={executing ? "text-amber-400 animate-pulse" : "text-emerald-400"}>{executing ? "FIRING ORDER..." : "ARMED & LISTENING FOR VERDICT"}</span></span>
+            <span>Target Asset: {selected}</span>
           </div>
           {execResult && (
             <div className="p-2 bg-black border border-zinc-800 text-zinc-300 overflow-x-auto">
@@ -324,3 +320,4 @@ function Index() {
     </main>
   );
 }
+
