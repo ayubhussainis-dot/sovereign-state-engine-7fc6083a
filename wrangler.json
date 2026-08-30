@@ -1,6 +1,7 @@
 {
   "name": "sovereign-state-engine",
   "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
   "d1_databases": [
     {
       "binding": "DB",
@@ -9,10 +10,7 @@
     }
   ],
   "vars": {
-    "BINANCE_TESTNET_API_KEY": "YOUR_KEY_HERE",
-    "BINANCE_TESTNET_API_SECRET": "YOUR_SECRET_HERE"
-  },
-  "triggers": {
-    "crons": ["* * * * *"]
+    "BINANCE_TESTNET_API_KEY": "7AHU64Hq1fgVHxGESUe775Z22y23V99oRBqEgClizXc2aufBM3Mk6wdZ712OXW2L",
+    "BINANCE_TESTNET_API_SECRET": "••••••••••••••••••••••••••••••••"
   }
 }
