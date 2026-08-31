@@ -1,6 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
 import { createHmac } from "crypto";
-import { EDARTRADEEngine } from "./edartrade.engine";
 
 const FAPI_BASE = "https://testnet.binancefuture.com";
 
@@ -28,11 +26,14 @@ export async function fetchFuturesTelemetry(
   let lastPrice: number | null = null;
   let markPrice: number | null = null;
   let publicFeedError: string | undefined;
+
+  // 1. Fetch public price & mark price in parallel
   try {
     const [markRes, tickerRes] = await Promise.all([
       fetch(`${FAPI_BASE}/fapi/v1/premiumIndex?symbol=${symbol}`),
       fetch(`${FAPI_BASE}/fapi/v1/ticker/price?symbol=${symbol}`),
     ]);
+
     if (markRes.ok && tickerRes.ok) {
       const mark = (await markRes.json()) as { markPrice: string };
       const ticker = (await tickerRes.json()) as { price: string };
@@ -45,10 +46,12 @@ export async function fetchFuturesTelemetry(
     publicFeedError = err instanceof Error ? err.message : String(err);
   }
 
+  // 2. Fetch authenticated account wallet balances securely via HMAC-SHA256
   let totalWalletBalance: number | null = null;
   let totalMarginBalance: number | null = null;
   let accountError: string | undefined;
   const ts = Date.now();
+
   if (!apiKey || !apiSecret) {
     accountError = "credentials not configured";
   } else {
@@ -59,6 +62,7 @@ export async function fetchFuturesTelemetry(
         `${FAPI_BASE}/fapi/v2/account?${query}&signature=${signature}`,
         { headers: { "X-MBX-APIKEY": apiKey } },
       );
+
       if (acctRes.ok) {
         const acct = (await acctRes.json()) as {
           totalWalletBalance: string;
