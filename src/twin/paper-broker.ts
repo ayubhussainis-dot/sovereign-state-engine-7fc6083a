@@ -44,7 +44,7 @@ export interface OpenSignal {
   price: number;
   ts: number;
   twinSeq: number;
-  waveType?: string;   // Optional filter: "EXPANDED", "ANTINODE_PEAK", "NODAL_ZERO", "COMPRESSED"
+  waveType?: string;   // "EXPANDED", "ANTINODE_PEAK", "NODAL_ZERO", "COMPRESSED"
   composite?: number;  // Optional quality threshold
 }
 
@@ -70,13 +70,14 @@ export class PaperBroker {
     };
   }
 
-  /** Attempt to open a position. Filters out choppy wave states to cut losses. */
+  /** Attempt to open a position. Restricts entry ONLY to high-win EXPANDED or ANTINODE_PEAK waves. */
   open(signal: OpenSignal): BrokerEvent | null {
     if (this.position) return null;
     if (!Number.isFinite(signal.price) || signal.price <= 0) return null;
 
-    // Fine-tuning filter: Block entry during choppy NODAL_ZERO or COMPRESSED states
-    if (signal.waveType === "NODAL_ZERO" || signal.waveType === "COMPRESSED") {
+    // Strict High-Win Filter: Only permit trade entry on EXPANDED or ANTINODE_PEAK wave states
+    const wave = (signal.waveType || "").toUpperCase();
+    if (wave !== "EXPANDED" && wave !== "ANTINODE_PEAK") {
       return null;
     }
 
@@ -159,7 +160,7 @@ export class PaperBroker {
     };
   }
 
-  recent(n = 20): readonly PaperTrade[] {
+    recent(n = 20): readonly PaperTrade[] {
     return this.trades.slice(-n);
   }
 
