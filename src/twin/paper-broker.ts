@@ -1,18 +1,3 @@
-/**
- * Paper Broker — deterministic paper execution over real Binance ticks.
- *
- * Contract:
- *   - No broker calls. No mock data. Uses the real live WS price fed in
- *     from the harness.
- *   - Opens ONE position when SOALL all-gates-passed AND fusion verdict
- *     is directional (LOCKED-BULL → long, LOCKED-BEAR → short).
- *   - Fixed notional, fixed stop/target as fraction of entry.
- *   - On every subsequent tick, marks the position and closes on
- *     stop-hit or target-hit at the crossing price.
- *   - Records realized PnL. Pure state machine — same tick tape yields
- *     identical trade log.
- */
-
 export type Side = "long" | "short";
 
 export interface PaperPosition {
@@ -59,6 +44,8 @@ export interface OpenSignal {
   price: number;
   ts: number;
   twinSeq: number;
+  waveType?: string;   // Optional filter: "EXPANDED", "ANTINODE_PEAK", "NODAL_ZERO", "COMPRESSED"
+  composite?: number;  // Optional quality threshold
 }
 
 export type BrokerEvent =
@@ -83,10 +70,16 @@ export class PaperBroker {
     };
   }
 
-  /** Attempt to open a position. No-op if one is already open. */
+  /** Attempt to open a position. Filters out choppy wave states to cut losses. */
   open(signal: OpenSignal): BrokerEvent | null {
     if (this.position) return null;
     if (!Number.isFinite(signal.price) || signal.price <= 0) return null;
+
+    // Fine-tuning filter: Block entry during choppy NODAL_ZERO or COMPRESSED states
+    if (signal.waveType === "NODAL_ZERO" || signal.waveType === "COMPRESSED") {
+      return null;
+    }
+
     const qty = this.cfg.notionalUsdt / signal.price;
     const stop =
       signal.side === "long"
@@ -96,6 +89,7 @@ export class PaperBroker {
       signal.side === "long"
         ? signal.price * (1 + this.cfg.targetFrac)
         : signal.price * (1 - this.cfg.targetFrac);
+    
     const pos: PaperPosition = {
       id: this.nextId++,
       side: signal.side,
@@ -106,6 +100,7 @@ export class PaperBroker {
       openedAt: signal.ts,
       openedTwinSeq: signal.twinSeq,
     };
+    
     this.position = pos;
     return { kind: "FILL", position: pos };
   }
@@ -131,6 +126,7 @@ export class PaperBroker {
       pos.side === "long"
         ? (exit - pos.entry) * pos.qty
         : (pos.entry - exit) * pos.qty;
+    
     const trade: PaperTrade = {
       id: pos.id,
       side: pos.side,
@@ -142,6 +138,7 @@ export class PaperBroker {
       openedAt: pos.openedAt,
       closedAt: ts,
     };
+
     this.trades.push(trade);
     this.cumPnL += gross;
     if (gross >= 0) this.wins++; else this.losses++;
