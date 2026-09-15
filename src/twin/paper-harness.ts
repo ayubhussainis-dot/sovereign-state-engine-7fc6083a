@@ -1,5 +1,5 @@
 /**
- * Paper Trading Harness — glues the live Binance Futures Testnet feed
+ * Paper Trading Harness — glues the live Binance Futures feed
  * to the deterministic MDT spine.
  *
  * A caller pushes ticks in via `ingest()`. The harness:
@@ -9,7 +9,7 @@
  *   4. Runs the SOALL G1..G8 pipeline (pure).
  *   5. Journals TWIN_TICK, PPG_SNAPSHOT, GATE_REPORT and — when the
  *      pipeline passes — a synthetic ORDER_INTENT into the hash-chained
- *      audit ledger. Nothing is ever sent to a broker.
+ *      audit ledger. Nothing is ever sent to a live exchange.
  *
  * Contract: single mutable instance, but every step above is a pure
  * function of the ingested tick sequence, so replaying the same tape
@@ -23,14 +23,16 @@ import { AuditLedger, type AuditEntry } from "@/lib/audit-ledger";
 import type { RiskContext, GateReport } from "@/soall/types";
 import type { LiveTick, TwinSnapshot } from "./types";
 import type { PPGSnapshot } from "@/ppg/types";
-import { PaperBroker, type PaperStats, type Side } from "./paper-broker";
+import { PaperExecutionSimulator, type PaperStats, type Side } from "./paper-execution-simulator";
+import { checkpoint, type T9Checkpoint } from "@/tix/t9";
 
 export interface HarnessCycle {
   twin: TwinSnapshot;
   ppg: PPGSnapshot;
   report: GateReport;
   entries: AuditEntry[];
-  broker: PaperStats;
+  paper: PaperStats;
+  tixT9: readonly T9Checkpoint[];
 }
 
 export interface HarnessTickInput {
@@ -62,7 +64,7 @@ export class PaperHarness {
   private readonly market = new InternalMarket({ capacity: 4096 });
   private readonly welford = new Welford();
   readonly ledger = new AuditLedger(4096);
-  readonly broker = new PaperBroker();
+  readonly paper = new PaperExecutionSimulator();
   private risk: RiskContext = {
     drawdownFraction: 0,
     consecutiveLosses: 0,
@@ -89,7 +91,12 @@ export class PaperHarness {
     };
     const tick = this.market.append(live);
     const twin = this.market.snapshot();
+    const tixT9: T9Checkpoint[] = [
+      checkpoint("MARKET", tick.twinSeq, { status: "PARSED" }),
+      checkpoint("DIGITAL_TWIN", tick.twinSeq, { status: "OBSERVED" }),
+    ];
     const ppg = profile({ twin }, this.welford);
+    tixT9.push(checkpoint("JACK_JOKER", tick.twinSeq, { status: "OBSERVED" }));
     const report = runPipeline({ twin, ppg, risk: this.risk });
 
     const entries: AuditEntry[] = [];
@@ -114,7 +121,7 @@ export class PaperHarness {
 
     // 1) Mark-to-market first: an already-open position gets a chance to
     //    close on THIS tick before a new one can be opened.
-    const markEv = this.broker.mark(tick.price, tick.ts);
+    const markEv = this.paper.mark(tick.price, tick.ts);
     if (markEv && markEv.kind === "CLOSE") {
       entries.push(
         this.ledger.append("TRADE_CLOSED", tick.ts, {
@@ -142,7 +149,7 @@ export class PaperHarness {
         }),
       );
       if (dir) {
-        const fill = this.broker.open({
+        const fill = this.paper.open({
           side: dir,
           price: tick.price,
           ts: tick.ts,
@@ -171,7 +178,7 @@ export class PaperHarness {
     }
 
     // 3) Nothing opened this cycle → journal exactly WHY.
-    if (!this.broker.stats().openPosition) {
+    if (!this.paper.stats().openPosition) {
       const dir =
         input.intent === "long" || input.intent === "short" ? input.intent : null;
       const weakest = report.outcomes.reduce((a, b) => (b.score < a.score ? b : a));
@@ -205,7 +212,7 @@ export class PaperHarness {
           tonConfidence: input.fusion?.tonConfidence,
         };
       } else {
-        blockedBy = "BROKER_REJECTED";
+        blockedBy = "PAPER_EXECUTION_REJECTED";
         detail = { intent: dir };
       }
       entries.push(
@@ -217,13 +224,34 @@ export class PaperHarness {
       );
     }
 
-    return { twin, ppg, report, entries, broker: this.broker.stats() };
+    const direction =
+      input.intent === "long"
+        ? "BULL"
+        : input.intent === "short"
+          ? "BEAR"
+          : "NEUTRAL";
+    tixT9.push(
+      checkpoint("FUSION", tick.twinSeq, { direction, status: input.fusion?.verdict ?? "SILENT" }),
+      checkpoint("SOALL", tick.twinSeq, {
+        direction,
+        status: report.tradeArmed ? "ARMED" : report.failedAt ?? "STANDBY",
+      }),
+      checkpoint("RISK_AUTHORITY", tick.twinSeq, {
+        direction,
+        status: report.failedAt === "G7_RISK" || report.failedAt === "G8_AUTHORITY" ? "VETO" : "OBSERVED",
+      }),
+      checkpoint("PAPER_EXECUTION", tick.twinSeq, {
+        direction,
+        status: this.paper.stats().openPosition ? "OPEN" : "FLAT",
+      }),
+    );
+    return { twin, ppg, report, entries, paper: this.paper.stats(), tixT9 };
   }
 
   reset(): void {
     this.market.reset();
     this.ledger.reset();
-    this.broker.reset();
+    this.paper.reset();
     this.welford.reset();
   }
                            }
