@@ -226,4 +226,4 @@ export class PaperHarness {
     this.broker.reset();
     this.welford.reset();
   }
-        }
+                           }
