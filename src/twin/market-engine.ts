@@ -3,10 +3,10 @@
  *
  * Reuses the existing spine verbatim:
  *   BinanceMirror (feed) → PaperHarness (InternalMarket → PPG → SOALL →
- *   PaperBroker) with fusion supplying directional intent.
+ *   PaperExecutionSimulator) with fusion supplying directional intent.
  *
  * No business logic is duplicated here. This class only owns per-market
- * *state*: its own mirror socket, its own twin/ledger/broker/Welford
+ * *state*: its own mirror socket, its own twin/ledger/paper execution/Welford
  * accumulator. A trade on one market can never touch another because no
  * mutable state is shared between instances.
  */
@@ -15,8 +15,9 @@ import { MC01StateEngine } from "../mc01/state-engine";
 import { getMirror, type MirrorFrame } from "./not-mirror";
 import { fuseFrame, fusionBlocker, type Fusion } from "./fusion";
 import { PaperHarness, type HarnessCycle } from "./paper-harness";
-import type { PaperTrade } from "./paper-broker";
+import type { PaperTrade } from "./paper-execution-simulator";
 import type { RiskContext } from "@/soall/types";
+import { checkpoint } from "@/tix/t9";
 import type { MC01State } from "../mc01/state-engine";
 import { tradeLedger } from "@/lib/trade-ledger";
 
@@ -147,8 +148,8 @@ export class MarketEngine {
   }
 
   /**
-   * Mirror real broker fills/closes into the permanent trade ledger.
-   * Driven only by audit entries the PaperBroker actually produced.
+   * Mirror paper execution fills/closes into the permanent trade ledger.
+   * Driven only by audit entries the PaperExecutionSimulator actually produced.
    */
   private journal(cycle: HarnessCycle, fusion: ReturnType<typeof fuseFrame>) {
     for (const e of cycle.entries) {
@@ -198,7 +199,7 @@ export class MarketEngine {
   snapshot(): MarketSnapshot {
     const frame = getMirror(this.symbol).current;
     const fusion = fuseFrame(frame);
-    const stats = this.harness.broker.stats();
+    const stats = this.harness.paper.stats();
     const mark = this.cycle?.twin.last?.price ?? frame.lastPrice;
     const pos = stats.openPosition;
     const unrealizedPnL =
@@ -218,8 +219,9 @@ export class MarketEngine {
       frame,
       unrealizedPnL,
       blockedBy: this.blockedBy,
-      trades: this.harness.broker.recent(20),
+      trades: this.harness.paper.recent(20),
       ticks: this.ticks,
     };
   }
 }
+
