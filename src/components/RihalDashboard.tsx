@@ -7,6 +7,11 @@ export interface ActivePositionMetrics {
   entryPrice: number;
   unRealizedProfit: number;
   leverage: number;
+  // Added performance tracking metrics for wins, losses, and win rate
+  wins?: number;
+  losses?: number;
+  winRate?: number;
+  peakProfit?: number; // Added to support the 50% trailing profit lock tracking
 }
 
 interface RihalDashboardProps {
@@ -168,7 +173,6 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         <div className="bg-zinc-900/40 p-3 border border-zinc-800">
           <span className="text-[10px] text-zinc-500 block">TENSION CABLES (VOLATILITY)</span>
           <span className="text-sm font-bold text-cyan-400">
-            {/* Kept bound to your telemetry object, falls back to 0.0200 if undefined */}
             {(telemetry.volatility ?? 0.0200).toFixed(4)}
           </span>
         </div>
@@ -189,7 +193,6 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
             ACTIVE STRUCTURAL SYSTEM WEIGHT
           </span>
           <span className="text-sm font-bold text-amber-400">
-            {/* Live calculation replacing the 0.00x placeholder */}
             {positionMetrics?.hasPosition 
                 ? `${(Math.abs(positionMetrics.positionAmt) * positionMetrics.leverage).toFixed(2)}x` 
                 : "0.00x"}
@@ -197,11 +200,11 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         </div>
       </div>
 
-      {/* --- ACTIVE PAYLOAD & PNL TRACKER --- */}
+      {/* --- ACTIVE PAYLOAD & PNL TRACKER (WITH WIN/LOSS & PERCENTAGE METRICS) --- */}
       <div className="mt-6 border border-zinc-800 bg-zinc-950 p-4">
         <div className="text-emerald-500 font-mono text-[10px] mb-3 tracking-widest uppercase flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-            STRUCTURAL PAYLOAD TELEMETRY
+            STRUCTURAL PAYLOAD TELEMETRY & WIN/LOSS TRACKER
         </div>
         
         {positionMetrics?.hasPosition ? (
@@ -229,10 +232,28 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
                 </div>
             </div>
         ) : (
-            <div className="text-zinc-600 font-mono text-xs animate-pulse">
+            <div className="text-zinc-600 font-mono text-xs">
                 NO ACTIVE STRUCTURAL PAYLOAD ... AWAITING MOMENTUM PULSE
             </div>
         )}
+
+        {/* Win / Loss Count and Win-Rate Percentage Display Bar */}
+        <div className="mt-4 pt-3 border-t border-zinc-900 grid grid-cols-3 gap-2 text-xs font-mono">
+            <div className="bg-zinc-900/60 p-2 border border-zinc-800">
+                <span className="text-[10px] text-zinc-500 block">WINS (LOCKED)</span>
+                <span className="text-emerald-400 font-bold">{positionMetrics?.wins ?? 0} W</span>
+            </div>
+            <div className="bg-zinc-900/60 p-2 border border-zinc-800">
+                <span className="text-[10px] text-zinc-500 block">LOSSES (CAPPED)</span>
+                <span className="text-red-400 font-bold">{positionMetrics?.losses ?? 0} L</span>
+            </div>
+            <div className="bg-zinc-900/60 p-2 border border-zinc-800">
+                <span className="text-[10px] text-zinc-500 block">WIN-RATE RATIO</span>
+                <span className="text-amber-400 font-bold">
+                    {positionMetrics?.winRate ? `${positionMetrics.winRate.toFixed(1)}%` : '0.0%'}
+                </span>
+            </div>
+        </div>
       </div>
 
       <footer className="mt-6 pt-4 border-t border-zinc-900 text-[10px] text-zinc-600 text-center tracking-widest">
