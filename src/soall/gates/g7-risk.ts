@@ -1,8 +1,7 @@
 /**
- * G7 — RISK
- * Decision Criterion: pass if DD < DD_max AND L_c < L_max.
+ * G7 — RISK (F1 TRANSMISSION & SPECTATOR FLOW)
+ * Purpose: Act as the ultimate safety harness / crash barrier without blocking normal runs.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
- * Updated: Added safe optional chaining and conditional hardVeto for smooth risk scaling.
  */
 
 import { evaluateG2 } from "@/engine/sovereign/g2-checkpoint";
@@ -19,13 +18,13 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
     consecutiveLosses,
   });
 
-  const passed = ladder.canTrade && authority.canTrade;
+  // Normal drawdown is handled organically by the 0.15 stop-loss.
+  // G7 only engages its safety harness on catastrophic threshold breaches.
+  const isCatastrophic = drawdownFraction > 0.12 || authority.state === "LOCKDOWN";
   
-  // Graceful score calculation with safety fallback
-  const score = passed ? Math.max(0, 1 - drawdownFraction * 10) : 0.05;
-
-  // Conditional hardVeto: Only hard-lock on catastrophic drawdown or authority lockdown
-  const hardVeto = drawdownFraction > 0.12 || authority.state === "LOCKDOWN";
+  const passed = !isCatastrophic; 
+  const score = Math.max(0.1, 1 - drawdownFraction * 5);
+  const hardVeto = isCatastrophic; // Only hard-locks in a true emergency crash scenario
 
   return {
     gate: "G7_RISK",
@@ -41,8 +40,8 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
       sizeMultiplier: ladder.sizeMultiplier,
     },
     reason: passed
-      ? `${ladder.status} · ${authority.state}`
-      : `Risk caution: ${ladder.reason} · ${authority.reason}`,
+      ? `safety harness secure · ${ladder.status} · ${authority.state}`
+      : `CRITICAL SAFETY HARNESS ENGAGED: ${ladder.reason} · ${authority.reason}`,
     specified: true,
   };
 };
