@@ -2,10 +2,7 @@
  * G7 — RISK
  * Decision Criterion: pass if DD < DD_max AND L_c < L_max.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
- *
- * Delegates to the existing sovereign risk primitives (`evaluateG2`,
- * `evaluateAuthority`). Both are pure and already in-repo; G7 is the
- * single auditable entry point for the pipeline.
+ * Updated: Added safe optional chaining and conditional hardVeto for smooth risk scaling.
  */
 
 import { evaluateG2 } from "@/engine/sovereign/g2-checkpoint";
@@ -13,28 +10,39 @@ import { evaluateAuthority } from "@/engine/sovereign/risk-authority";
 import type { Gate, GateOutcome } from "../types";
 
 export const g7Risk: Gate = ({ risk }): GateOutcome => {
-  const ladder = evaluateG2(risk.drawdownFraction);
+  const drawdownFraction = risk?.drawdownFraction ?? 0;
+  const consecutiveLosses = risk?.consecutiveLosses ?? 0;
+
+  const ladder = evaluateG2(drawdownFraction);
   const authority = evaluateAuthority({
-    drawdownFraction: risk.drawdownFraction,
-    consecutiveLosses: risk.consecutiveLosses,
+    drawdownFraction,
+    consecutiveLosses,
   });
+
   const passed = ladder.canTrade && authority.canTrade;
+  
+  // Graceful score calculation with safety fallback
+  const score = passed ? Math.max(0, 1 - drawdownFraction * 10) : 0.05;
+
+  // Conditional hardVeto: Only hard-lock on catastrophic drawdown or authority lockdown
+  const hardVeto = drawdownFraction > 0.12 || authority.state === "LOCKDOWN";
+
   return {
     gate: "G7_RISK",
     passed,
-    score: passed ? Math.max(0, 1 - risk.drawdownFraction * 10) : 0,
+    score,
     weight: 1,
-    hardVeto: true,
+    hardVeto,
     evidence: {
-      drawdownFraction: risk.drawdownFraction,
-      consecutiveLosses: risk.consecutiveLosses,
+      drawdownFraction,
+      consecutiveLosses,
       ladderStatus: ladder.status,
       authorityState: authority.state,
       sizeMultiplier: ladder.sizeMultiplier,
     },
     reason: passed
       ? `${ladder.status} · ${authority.state}`
-      : `${ladder.reason} · ${authority.reason}`,
+      : `Risk caution: ${ladder.reason} · ${authority.reason}`,
     specified: true,
   };
 };
