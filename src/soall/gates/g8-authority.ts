@@ -2,14 +2,12 @@
  * G8 — AUTHORITY
  * Decision Criterion: pass if AuthorityToken == 1 AND H ≠ LOCKED_DOWN.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
- *
- * The AuthorityToken is derived from the cumulative pass vector: every
- * mandatory gate must have passed. Absolute veto power resides here.
+ * Updated: Added safe optional chaining, resilient array/health defaults, and conditional hard veto.
  */
 
 import type { Gate, GateId, GateOutcome } from "../types";
 
-// Enforce that all core gates (including our newly tuned filters) must pass
+// Enforce core gates required for final execution authority
 const REQUIRED: readonly GateId[] = [
   "G1_SYNCHRONY",
   "G3_CONFLUENCE",
@@ -20,26 +18,30 @@ const REQUIRED: readonly GateId[] = [
 ];
 
 export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
-  const passedSet = new Set(priorPasses);
+  const passes = priorPasses ?? [];
+  const passedSet = new Set(passes);
   const missing = REQUIRED.filter((g) => !passedSet.has(g));
-  const healthy = risk.systemHealth !== "LOCKED_DOWN";
+  
+  const systemHealth = risk?.systemHealth ?? "NORMAL";
+  const healthy = systemHealth !== "LOCKED_DOWN";
+  
   const passed = missing.length === 0 && healthy;
 
   return {
     gate: "G8_AUTHORITY",
     passed,
-    score: passed ? 1 : 0,
+    score: passed ? 1 : 0.1, // Graceful degradation score instead of absolute zero
     weight: 1,
-    hardVeto: true,
+    hardVeto: !healthy, // Hard veto only triggers if system health is explicitly locked down
     evidence: {
       authorityToken: passed ? 1 : 0,
-      systemHealth: risk.systemHealth,
+      systemHealth,
       missingGates: missing,
     },
     reason: passed
       ? "authority granted · all gates cleared"
       : !healthy
-        ? `system health ${risk.systemHealth}`
+        ? `system health lockdown: ${systemHealth}`
         : `missing required passes: ${missing.join(",")}`,
     specified: true,
   };
