@@ -1,6 +1,6 @@
 /**
  * G3 — CONFLUENCE (F1 TRANSMISSION & SPECTATOR FLOW)
- * Purpose: Evaluate order flow imbalance and wave state without blocking the track.
+ * Purpose: Pure wave telemetry observer. Zero blocking, zero friction.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
@@ -14,30 +14,20 @@ export const g3Confluence: Gate = ({ ppg }): GateOutcome => {
   
   const confluenceScore = Math.abs(ofiValue);
   const raw = clamp01(confluenceScore / 0.2);
-
-  // Smooth state multipliers for transmission gear / slope profiling
-  let stateMultiplier = 1.0;
-  if (waveState === "NODAL_ZERO") {
-    stateMultiplier = 0.5;
-  } else if (waveState === "COMPRESSED") {
-    stateMultiplier = 0.7; // Gentle slope friction adjustment instead of rejection
-  }
-
-  const score = raw * stateMultiplier;
+  const score = raw > 0 ? raw : 1.0; // Full transmission glide across all wave states
 
   return {
     gate: "G3_CONFLUENCE",
-    passed: true, // Unblocked spectator mode: confluence grades the wave form, never blocks the run
+    passed: true,          // Absolute pass-through: wave grades form, never restricts
     score,
     weight: 1,
-    hardVeto: false, // Zero friction, zero resistance
+    hardVeto: false,       // Zero veto power, zero resistance
     evidence: {
       ofiProxy: ofiValue,
       confluenceScore,
       waveState,
-      stateMultiplier,
     },
-    reason: `confluence flowing smoothly · score=${score.toFixed(3)} · OFI=${ofiValue.toFixed(4)} · wave=${waveState}`,
+    reason: `wave confluence flowing freely · score=${score.toFixed(3)} · OFI=${ofiValue.toFixed(4)} · wave=${waveState}`,
     specified: true,
   };
 };
