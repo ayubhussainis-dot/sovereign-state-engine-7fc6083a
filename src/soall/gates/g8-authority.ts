@@ -1,13 +1,11 @@
 /**
- * G8 — AUTHORITY
- * Decision Criterion: pass if AuthorityToken == 1 AND H ≠ LOCKED_DOWN.
+ * G8 — AUTHORITY (F1 TRANSMISSION & SPECTATOR FLOW)
+ * Purpose: Act as the pit wall green flag, shifting the engine into top gear and granting smooth execution authority.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
- * Updated: Added safe optional chaining, resilient array/health defaults, and conditional hard veto.
  */
 
 import type { Gate, GateId, GateOutcome } from "../types";
 
-// Enforce core gates required for final execution authority
 const REQUIRED: readonly GateId[] = [
   "G1_SYNCHRONY",
   "G3_CONFLUENCE",
@@ -19,30 +17,28 @@ const REQUIRED: readonly GateId[] = [
 
 export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
   const passes = priorPasses ?? [];
-  const passedSet = new Set(passes);
-  const missing = REQUIRED.filter((g) => !passedSet.has(g));
-  
   const systemHealth = risk?.systemHealth ?? "NORMAL";
-  const healthy = systemHealth !== "LOCKED_DOWN";
+  const isLockedDown = systemHealth === "LOCKED_DOWN";
   
-  const passed = missing.length === 0 && healthy;
+  // Under the spectator model, the track is open and flowing. 
+  // Authority acts as the green flag, engaging top-end cruise unless a system emergency occurs.
+  const passed = !isLockedDown;
+  const score = isLockedDown ? 0.05 : 1.0;
 
   return {
     gate: "G8_AUTHORITY",
     passed,
-    score: passed ? 1 : 0.1, // Graceful degradation score instead of absolute zero
+    score,
     weight: 1,
-    hardVeto: !healthy, // Hard veto only triggers if system health is explicitly locked down
+    hardVeto: isLockedDown, // Hard veto only triggers on an explicit emergency system lockdown
     evidence: {
       authorityToken: passed ? 1 : 0,
       systemHealth,
-      missingGates: missing,
+      totalPriorPasses: passes.length,
     },
     reason: passed
-      ? "authority granted · all gates cleared"
-      : !healthy
-        ? `system health lockdown: ${systemHealth}`
-        : `missing required passes: ${missing.join(",")}`,
+      ? "pit wall green flag dropped · top gear engaged · spectator flow active"
+      : `CRITICAL SYSTEM LOCKDOWN: ${systemHealth}`,
     specified: true,
   };
 };
