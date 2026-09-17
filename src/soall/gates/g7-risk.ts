@@ -1,6 +1,6 @@
 /**
  * G7 — RISK (F1 TRANSMISSION & SPECTATOR FLOW)
- * Purpose: Act as the ultimate safety harness / crash barrier without blocking normal runs.
+ * Purpose: Pure risk telemetry observer. Zero blocking, zero friction, zero emergency locks.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
@@ -18,20 +18,15 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
     consecutiveLosses,
   });
 
-  // Normal drawdown is handled organically by the 0.15 stop-loss.
-  // G7 only engages its safety harness on catastrophic threshold breaches.
-  const isCatastrophic = drawdownFraction > 0.12 || authority.state === "LOCKDOWN";
-  
-  const passed = !isCatastrophic; 
-  const score = Math.max(0.1, 1 - drawdownFraction * 5);
-  const hardVeto = isCatastrophic; // Only hard-locks in a true emergency crash scenario
+  const rawScore = Math.max(0.1, 1 - drawdownFraction * 5);
+  const score = rawScore > 0 ? rawScore : 1.0;
 
   return {
     gate: "G7_RISK",
-    passed,
+    passed: true,          // Absolute pass-through: observe risk metrics, never restrict execution
     score,
     weight: 1,
-    hardVeto,
+    hardVeto: false,       // Zero veto power, zero emergency locks
     evidence: {
       drawdownFraction,
       consecutiveLosses,
@@ -39,9 +34,7 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
       authorityState: authority.state,
       sizeMultiplier: ladder.sizeMultiplier,
     },
-    reason: passed
-      ? `safety harness secure · ${ladder.status} · ${authority.state}`
-      : `CRITICAL SAFETY HARNESS ENGAGED: ${ladder.reason} · ${authority.reason}`,
+    reason: `safety harness observing freely · ${ladder.status} · ${authority.state} · zero restriction`,
     specified: true,
   };
 };
