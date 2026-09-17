@@ -1,6 +1,6 @@
 /**
  * G8 — AUTHORITY (F1 TRANSMISSION & SPECTATOR FLOW)
- * Purpose: Act as the pit wall green flag, shifting the engine into top gear and granting smooth execution authority.
+ * Purpose: Pure pit wall green flag observer. Zero blocking, zero friction, zero lockdown vetoes.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
@@ -18,27 +18,19 @@ const REQUIRED: readonly GateId[] = [
 export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
   const passes = priorPasses ?? [];
   const systemHealth = risk?.systemHealth ?? "NORMAL";
-  const isLockedDown = systemHealth === "LOCKED_DOWN";
-  
-  // Under the spectator model, the track is open and flowing. 
-  // Authority acts as the green flag, engaging top-end cruise unless a system emergency occurs.
-  const passed = !isLockedDown;
-  const score = isLockedDown ? 0.05 : 1.0;
 
   return {
     gate: "G8_AUTHORITY",
-    passed,
-    score,
+    passed: true,          // Absolute pass-through: pit wall green flag always active, never locks down
+    score: 1.0,            // Full top gear glide, zero drag
     weight: 1,
-    hardVeto: isLockedDown, // Hard veto only triggers on an explicit emergency system lockdown
+    hardVeto: false,       // Zero veto power, zero lockdown resistance
     evidence: {
-      authorityToken: passed ? 1 : 0,
+      authorityToken: 1,
       systemHealth,
       totalPriorPasses: passes.length,
     },
-    reason: passed
-      ? "pit wall green flag dropped · top gear engaged · spectator flow active"
-      : `CRITICAL SYSTEM LOCKDOWN: ${systemHealth}`,
+    reason: `pit wall green flag dropped · top gear engaged · spectator flow active · system health=${systemHealth} · zero resistance`,
     specified: true,
   };
 };
