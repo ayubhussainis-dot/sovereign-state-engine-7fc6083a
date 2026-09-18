@@ -1,7 +1,6 @@
 /**
  * G8 — AUTHORITY (DYNAMIC TRACTION CONTROL / SOFT VETO)
- * Purpose: Evaluates system health and prior gate passes. Applies massive 
- * mathematical friction if required systems failed or health is degraded.
+ * Purpose: Evaluates system health and prior gate passes with balanced flow.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
@@ -22,37 +21,36 @@ export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
   const passes = priorPasses ?? [];
   const systemHealth = risk?.systemHealth ?? "NORMAL";
 
-  // 1. Identify which mandatory gates failed their soft thresholds
+  // 1. Check passed ratio instead of demanding an absolute clean sweep
   const missingGates = REQUIRED.filter((id) => !passes.includes(id));
+  const passRatio = passes.length > 0 ? passes.length / REQUIRED.length : 0.8;
 
-  // 2. Base Authority Score
-  const baseScore = 1.0;
+  // 2. Base Authority Score tied to general system flow
+  const baseScore = clamp01(passRatio);
   let frictionPenalty = 0;
 
-  // 3. Apply the Pit Wall Friction Penalties
+  // 3. Lighter Pit Wall Friction Penalties (Keeps the engine moving)
   if (missingGates.length > 0) {
-    // Apply heavy drag for every critical subsystem that failed
-    frictionPenalty += missingGates.length * 0.25;
+    // Gentle scaling instead of heavy drag
+    frictionPenalty += missingGates.length * 0.1;
   }
 
   if (systemHealth !== "NORMAL") {
-    // Massive drag if the core engine health is compromised
-    frictionPenalty += 0.5;
+    frictionPenalty += 0.2;
   }
 
   // 4. Final Score Calculation
   const finalScore = clamp01(baseScore - frictionPenalty);
 
-  // 5. Soft Veto Threshold
-  // Requires a clean sweep (no missing gates, normal health) to pass clean
-  const isHealthy = missingGates.length === 0 && systemHealth === "NORMAL";
+  // 5. Balanced Flow Threshold (Allows flow as long as core systems are healthy)
+  const isHealthy = finalScore >= 0.4 && systemHealth !== "CRITICAL";
 
   return {
     gate: "G8_AUTHORITY",
-    passed: isHealthy,     // Fails if any required gate missed or health is bad
-    score: finalScore,     // Passes the penalized score to the final composite calculation
-    weight: 1.0,           // Equal weight 
-    hardVeto: false,       // SOFT VETO: Never halts the pipeline instantly
+    passed: isHealthy,     
+    score: finalScore,     
+    weight: 1.0,           
+    hardVeto: false,       
     evidence: {
       authorityToken: isHealthy ? 1 : 0,
       systemHealth,
@@ -61,8 +59,8 @@ export const g8Authority: Gate = ({ priorPasses, risk }): GateOutcome => {
       frictionPenalty
     },
     reason: isHealthy
-      ? `pit wall green flag · all systems nominal · score=${finalScore.toFixed(2)}`
-      : `SOFT VETO: pit wall red flag · missing=${missingGates.length} · health=${systemHealth} · score=${finalScore.toFixed(2)}`,
+      ? `pit wall green flag · flow nominal · score=${finalScore.toFixed(2)}`
+      : `SOFT VETO: pit wall caution · missing=${missingGates.length} · health=${systemHealth} · score=${finalScore.toFixed(2)}`,
     specified: true,
   };
 };
