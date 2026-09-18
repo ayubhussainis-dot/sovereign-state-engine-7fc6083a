@@ -10,6 +10,7 @@
  *   - Initial stop set to a tight 10 bps (0.0010) bare minimum to cut losses fast.
  *   - Locks stop to breakeven at +15 bps (0.0015) gain so downside risk becomes zero.
  *   - Closes for a win when target hits +45 bps (0.0045).
+ *   - Only counts strictly positive PnL trades as wins (filters out $0.00 scratches).
  */
 
 export type Side = "long" | "short";
@@ -179,9 +180,11 @@ export class PaperExecutionSimulator {
     this.trades.push(trade);
     this.cumPnL += gross;
 
-    if (gross >= 0) {
+    // Fixed win/loss logic: only actual positive profit counts as a win. 
+    // Zero-dollar scratches stay neutral.
+    if (gross > 0) {
       this.wins++;
-    } else {
+    } else if (gross < 0) {
       this.losses++;
     }
 
