@@ -27,9 +27,11 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
   // 2. Apply Risk Friction Penalties (The Soft Circuit Breaker)
   let frictionPenalty = 0;
 
-  // Cool down the engine heavily if we are in a losing streak (sawtooth chop)
-  if (consecutiveLosses >= 2) {
-    frictionPenalty += 0.4;
+  // Cool down the engine heavily even after a single loss in chop
+  if (consecutiveLosses === 1) {
+    frictionPenalty += 0.3;
+  } else if (consecutiveLosses >= 2) {
+    frictionPenalty += 0.6; // Heavier drag to force a stand-down
   }
   
   // Apply maximum drag if the risk authority demands a lockdown
