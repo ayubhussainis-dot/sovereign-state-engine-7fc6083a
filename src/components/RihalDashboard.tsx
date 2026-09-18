@@ -200,7 +200,7 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         </div>
       </div>
 
-      {/* --- ACTIVE PAYLOAD & PNL TRACKER (WITH WIN/LOSS & PERCENTAGE METRICS) --- */}
+      {/* --- ACTIVE PAYLOAD & PNL TRACKER --- */}
       <div className="mt-6 border border-zinc-800 bg-zinc-950 p-4">
         <div className="text-emerald-500 font-mono text-[10px] mb-3 tracking-widest uppercase flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
@@ -237,7 +237,6 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
             </div>
         )}
 
-        {/* Win / Loss Count and Win-Rate Percentage Display Bar */}
         <div className="mt-4 pt-3 border-t border-zinc-900 grid grid-cols-3 gap-2 text-xs font-mono">
             <div className="bg-zinc-900/60 p-2 border border-zinc-800">
                 <span className="text-[10px] text-zinc-500 block">WINS (LOCKED)</span>
@@ -256,9 +255,29 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         </div>
       </div>
 
+      {/* --- MOBILE DEBUGGER: RAW JSON DUMP --- */}
+      <div className="mt-6 border border-zinc-800 bg-black p-4 overflow-hidden">
+        <div className="text-amber-500 font-mono text-[10px] mb-3 tracking-widest flex items-center gap-2">
+            <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
+            LIVE PAYLOAD INSPECTOR (DEBUG)
+        </div>
+        <pre className="text-[10px] text-zinc-400 overflow-x-auto whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+          {JSON.stringify({ 
+            zScore, 
+            sMultiplier, 
+            telemetry: {
+              volatility: telemetry.volatility,
+              liquidityDepth: telemetry.liquidityDepth,
+              currentOfi: telemetry.currentOfi
+            }
+          }, null, 2)}
+        </pre>
+      </div>
+
       <footer className="mt-6 pt-4 border-t border-zinc-900 text-[10px] text-zinc-600 text-center tracking-widest">
         SYSTEMS ARCHITECT — AYUB ABDUL HUSSAIN · AYUBHUSSAINOID
       </footer>
     </div>
   );
 };
+
