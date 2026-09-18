@@ -1,22 +1,30 @@
 /**
- * G4 — PATTERN (STRUCTURAL FORMATION SCORING)
- * Purpose: Scores chart pattern alignments without halting execution.
+ * G4 — PATTERN
+ * Decision Criterion: pass if PatternFriction ≤ Threshold_friction.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
+ * NOTE: PatternFriction composition and threshold are unspecified.
  */
 
 import type { Gate, GateOutcome } from "../types";
 
-export const g4Pattern: Gate = ({ pattern }): GateOutcome => {
-  const confidence = pattern?.confidence ?? 0.75;
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
+export const g4Pattern: Gate = ({ ppg }): GateOutcome => {
+  const patternFriction = ppg.volatility.value * 10 + ppg.spread.value / 1000;
+  const score = clamp01(1 - patternFriction);
+  const passed = true;
   return {
     gate: "G4_PATTERN",
-    passed: true,          // Non-blocking score feed
-    score: confidence,     
-    weight: 1.0,
+    passed,
+    score,
+    weight: 1,
     hardVeto: false,
-    evidence: { patternType: pattern?.type ?? "NONE", confidence },
-    reason: `pattern evaluated · confidence=${confidence.toFixed(3)}`,
+    evidence: {
+      volatility: ppg.volatility.value,
+      spread: ppg.spread.value,
+      patternFriction,
+    },
+    reason: `pattern ${score.toFixed(3)} · friction=${patternFriction.toFixed(4)}`,
     specified: true,
   };
 };
