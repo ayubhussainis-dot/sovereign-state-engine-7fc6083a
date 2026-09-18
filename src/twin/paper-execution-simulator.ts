@@ -9,7 +9,7 @@
  *   - Fixed $10 notional.
  *   - Initial stop set to 17.5 bps (0.00175).
  *   - Locks stop to breakeven at +15 bps (0.0015) gain so downside risk becomes zero.
- *   - Closes for a win when target hits +50 bps (0.0050) for a 35 bps net profit from breakeven.
+ *   - Closes for a win when target hits +45 bps (0.0045).
  *   - Only counts strictly positive PnL trades as wins (filters out $0.00 scratches).
  */
 
@@ -79,7 +79,7 @@ export class PaperExecutionSimulator {
     this.cfg = {
       notionalUsdt: 10,
       stopFrac: 0.00175,  // 17.5 bps initial stop
-      targetFrac: 0.0050,  // 50 bps total target (giving a 35 bps net win from breakeven)
+      targetFrac: 0.0045,  // Restored to 45 bps target win
       ...cfg,
     };
   }
@@ -118,7 +118,7 @@ export class PaperExecutionSimulator {
     return { kind: "FILL", position: pos };
   }
 
-  /** Mark the open position against the latest tick; handles breakeven lock and 50 bps target exits. */
+  /** Mark the open position against the latest tick; handles breakeven lock and 45 bps target exits. */
   mark(price: number, ts: number): PaperExecutionEvent | null {
     const pos = this.position;
 
