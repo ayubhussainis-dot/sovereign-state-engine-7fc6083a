@@ -135,6 +135,21 @@ function Index() {
     };
   }, [mode]);
 
+  // NEW: Feed live Paper Trading telemetry into the proprietary IP Worker
+  useEffect(() => {
+    if (mode === "PAPER" && workerRef.current && mirror && cycle) {
+      workerRef.current.postMessage({
+        type: "TELEMETRY",
+        telemetry: {
+          currentPrice: mirror.lastPrice,
+          currentOfi: cycle.ppg.ofi.value,
+          liquidityDepth: Math.abs(mirror.orderFlow || 5000),
+          volatility: cycle.ppg.volatility.value,
+        },
+      });
+    }
+  }, [mode, mirror?.lastPrice, cycle?.ppg.ofi.value, cycle?.ppg.volatility.value]);
+
   const isDev = import.meta.env.DEV;
 
   return (
@@ -146,6 +161,20 @@ function Index() {
         telemetry={telemetry}
         zScore={zScore}
         sMultiplier={sMultiplier}
+        positionMetrics={
+          cycle ? {
+            hasPosition: !!cycle.paper.openPosition,
+            positionAmt: cycle.paper.openPosition?.side === "short" 
+                ? -(cycle.paper.openPosition?.qty || 0) 
+                : (cycle.paper.openPosition?.qty || 0),
+            entryPrice: cycle.paper.openPosition?.entry || 0,
+            unRealizedProfit: sel?.unrealizedPnL || 0,
+            leverage: 2,
+            wins: cycle.paper.wins,
+            losses: cycle.paper.losses,
+            winRate: cycle.paper.winRate * 100
+          } : null
+        }
       />
 
       <div className="w-full max-w-4xl border border-zinc-800 p-3 font-mono text-[10px] tracking-widest flex flex-wrap gap-x-6 gap-y-1">
@@ -856,4 +885,4 @@ function Index() {
       )}
     </main>
   );
-          }
+}
