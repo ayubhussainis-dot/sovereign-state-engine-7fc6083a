@@ -1,42 +1,45 @@
 /**
- * G3 — CONFLUENCE (ABHMPTD SCORING)
- * Purpose: Evaluates order flow and deployment capacity via your exact original ABHMPTD module.
+ * G3 — CONFLUENCE (WITH POWERTRAIN INTEGRATION)
+ * Purpose: Evaluates order flow and bounds deployment capacity via the F1 Powertrain bridge.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
 import type { Gate, GateOutcome } from "../types";
-import { evaluateABHMPTD } from "@/engine/modules/ab-hmptd";
+import { evaluatePowertrainBridge } from "@/engine/modules/powertrain-bridge";
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
 export const g3Confluence: Gate = ({ ppg, twin, risk }): GateOutcome => {
-  // Calls your exact original function name and input structure
-  const abhState = evaluateABHMPTD({
-    capital: risk?.capital ?? 10000,
-    allocatedCapital: risk?.allocatedCapital ?? 1000,
-    workload: twin?.workload ?? 0.3,
-    recovery: risk?.recovery ?? 0.8,
-    environmentalStress: risk?.stress ?? 0.1,
+  // Evaluate F1 Powertrain deployment metrics
+  const powertrain = evaluatePowertrainBridge({
+    maxPower: 100,
+    currentPower: twin?.workload ? twin.workload * 100 : 30,
+    deploymentDemand: Math.abs(ppg?.ofi?.value ?? 0),
+    temporalRemaining: 0.8,
+    capitalCapacity: risk?.capital ?? 10000,
+    currentExposure: risk?.allocatedCapital ?? 1000,
   });
 
-  const rawOfi = ppg?.ofi?.value ?? 0;
-  const normalizedOfi = Math.min(Math.abs(rawOfi) / 1e9, 1.0);
+  const confluenceScore = Math.abs(ppg.ofi.value);
+  const raw = clamp01(confluenceScore / 0.2);
+  const score = clamp01((raw * 0.5) + (powertrain.usableCapitalFraction * 0.5));
   
-  const finalScore = clamp01((normalizedOfi * 0.5) + (abhState.performanceCapacity * 0.5));
+  const passed = true; // Non-blocking telemetry feed
 
   return {
     gate: "G3_CONFLUENCE",
-    passed: true,          
-    score: finalScore,     
-    weight: 1.0,           
-    hardVeto: false,       
+    passed,
+    score,
+    weight: 1,
+    hardVeto: false,
     evidence: {
-      ofiProxy: rawOfi,
-      deploymentCapacity: abhState.deploymentCapacity,
-      performanceCapacity: abhState.performanceCapacity,
-      depleted: abhState.depleted
+      ofiProxy: ppg.ofi.value,
+      deploymentCapacity: powertrain.deploymentCapacity,
+      usableCapitalFraction: powertrain.usableCapitalFraction,
+      powerUtilization: powertrain.powerUtilization,
+      overloaded: powertrain.overloaded,
     },
-    reason: `ABHMPTD confluence evaluated · deploymentCapacity=${abhState.deploymentCapacity.toFixed(3)}`,
+    reason: `confluence evaluated · usableCapital=${powertrain.usableCapitalFraction.toFixed(3)} · powerUtil=${powertrain.powerUtilization.toFixed(3)}`,
     specified: true,
   };
 };
