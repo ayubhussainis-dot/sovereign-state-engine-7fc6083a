@@ -1,7 +1,6 @@
 /**
  * G7 — RISK (DYNAMIC TRACTION CONTROL / SOFT VETO)
- * Purpose: Evaluates drawdown and consecutive losses. Applies natural
- * mathematical feedback without choking the engine flow.
+ * Purpose: Evaluates drawdown and consecutive losses with expanded flow buffer.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
@@ -21,25 +20,25 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
     consecutiveLosses,
   });
 
-  // 1. Base Score calculation
-  const baseScore = clamp01(1 - (drawdownFraction * 5));
+  // 1. Base Score calculation with expanded buffer (scaled to 0.50 tolerance)
+  const baseScore = clamp01(1 - (drawdownFraction * 3.0));
 
-  // 2. Natural Risk Friction (Original Balanced Flow)
+  // 2. Natural Risk Friction (Balanced Flow)
   let frictionPenalty = 0;
 
-  if (consecutiveLosses >= 2) {
-    frictionPenalty += 0.4;
+  if (consecutiveLosses >= 3) {
+    frictionPenalty += 0.3; // Softer penalty to prevent immediate lockouts
   }
   
   if (authority.state === "LOCKED_DOWN") {
-    frictionPenalty += 0.8;
+    frictionPenalty += 0.6;
   }
 
   // 3. Final Score Calculation
   const finalScore = clamp01(baseScore - frictionPenalty);
 
-  // 4. Threshold
-  const isHealthy = finalScore >= 0.3;
+  // 4. Adjusted Threshold (Shifted to 0.50 buffer flow)
+  const isHealthy = finalScore >= 0.50;
 
   return {
     gate: "G7_RISK",
@@ -56,8 +55,8 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
       frictionPenalty
     },
     reason: isHealthy
-      ? `risk tolerances stable · score=${finalScore.toFixed(3)} · losses=${consecutiveLosses}`
-      : `SOFT VETO: elevated risk / cooldown required · score=${finalScore.toFixed(3)} · losses=${consecutiveLosses}`,
+      ? `risk tolerances stable · flow buffer active (0.50) · score=${finalScore.toFixed(3)}`
+      : `SOFT VETO: elevated risk / drawdown buffer reached · score=${finalScore.toFixed(3)}`,
     specified: true,
   };
 };
