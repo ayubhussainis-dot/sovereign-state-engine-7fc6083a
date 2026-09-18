@@ -136,10 +136,17 @@ export class PaperHarness {
       );
     }
 
-    // 2) If gates passed AND fusion is directional, log intent + open.
+    // 2) If gates passed, evaluate direction (automatically triggering on +15 / -15 flow if intent is flat) and open.
     if (report.allPassed) {
+      const flowValue = input.fusion?.consensusBull ?? 0;
+      const derivedIntent: Side | "flat" =
+        input.intent && input.intent !== "flat"
+          ? input.intent
+          : flowValue >= 15 ? "long" : flowValue <= -15 ? "short" : "flat";
+
       const dir: Side | null =
-        input.intent === "long" || input.intent === "short" ? input.intent : null;
+        derivedIntent === "long" || derivedIntent === "short" ? derivedIntent : null;
+
       entries.push(
         this.ledger.append("ORDER_INTENT", tick.ts, {
           twinSeq: tick.twinSeq,
@@ -179,8 +186,14 @@ export class PaperHarness {
 
     // 3) Nothing opened this cycle → journal exactly WHY.
     if (!this.paper.stats().openPosition) {
+      const flowValue = input.fusion?.consensusBull ?? 0;
+      const derivedIntent: Side | "flat" =
+        input.intent && input.intent !== "flat"
+          ? input.intent
+          : flowValue >= 15 ? "long" : flowValue <= -15 ? "short" : "flat";
       const dir =
-        input.intent === "long" || input.intent === "short" ? input.intent : null;
+        derivedIntent === "long" || derivedIntent === "short" ? derivedIntent : null;
+
       const weakest = report.outcomes.reduce((a, b) => (b.score < a.score ? b : a));
       let blockedBy: string;
       let detail: Record<string, unknown>;
@@ -224,12 +237,19 @@ export class PaperHarness {
       );
     }
 
+    const flowValForDir = input.fusion?.consensusBull ?? 0;
+    const resolvedDir =
+      input.intent && input.intent !== "flat"
+        ? input.intent
+        : flowValForDir >= 15 ? "long" : flowValForDir <= -15 ? "short" : "flat";
+
     const direction =
-      input.intent === "long"
+      resolvedDir === "long"
         ? "BULL"
-        : input.intent === "short"
+        : resolvedDir === "short"
           ? "BEAR"
           : "NEUTRAL";
+
     tixT9.push(
       checkpoint("FUSION", tick.twinSeq, { direction, status: input.fusion?.verdict ?? "SILENT" }),
       checkpoint("SOALL", tick.twinSeq, {
@@ -248,10 +268,10 @@ export class PaperHarness {
     return { twin, ppg, report, entries, paper: this.paper.stats(), tixT9 };
   }
 
-  reset(): void {
+    reset(): void {
     this.market.reset();
     this.ledger.reset();
     this.paper.reset();
     this.welford.reset();
   }
-                           }
+}
