@@ -69,14 +69,15 @@ export class PaperExecutionSimulator {
   private wins = 0;
   private losses = 0;
 
-  constructor(cfg?: Partial<PaperExecutionConfig>) {
+    constructor(cfg?: Partial<PaperExecutionConfig>) {
     this.cfg = {
       notionalUsdt: 10,
-      stopFrac: 0.0015,   // Initial 15 bps safety stop
+      stopFrac: 0.0020,   // Widened to 20 bps to absorb deeper retests
       targetFrac: 0.0045,  // Exactly 45 bps target win
       ...cfg,
     };
   }
+
 
   open(signal: OpenSignal): PaperExecutionEvent | null {
     if (this.position) return null;
