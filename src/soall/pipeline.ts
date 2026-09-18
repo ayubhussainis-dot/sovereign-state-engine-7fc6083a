@@ -3,7 +3,7 @@
  * First failure halts. Every outcome is returned; the caller journals
  * the report to the audit ledger.
  *
- * Contract: Deterministic · Pure · No side effects · Replay safe.
+ * Contract: Production-ready deterministic logic · Pure · Replay safe.
  */
 
 import { g1Synchrony } from "./gates/g1-synchrony";
@@ -42,7 +42,7 @@ export interface PipelineInputs {
   risk: RiskContext;
 }
 
-const COMPOSITE_THRESHOLD = 0.55;
+const COMPOSITE_THRESHOLD = 0.85;
 
 export function runPipeline(inputs: PipelineInputs): GateReport {
   const outcomes: GateOutcome[] = [];
@@ -71,12 +71,14 @@ export function runPipeline(inputs: PipelineInputs): GateReport {
     weighted += o.weight * o.score;
   }
   const compositeScore = weightSum > 0 ? weighted / weightSum : 0;
-  const tradeArmed = failedAt === null && compositeScore >= COMPOSITE_THRESHOLD;
+  
+  const allGatesPassed = outcomes.every(o => o.passed);
+  const tradeArmed = failedAt === null && allGatesPassed && compositeScore >= COMPOSITE_THRESHOLD;
 
   return {
     outcomes,
     failedAt,
-    allPassed: tradeArmed,
+    allPassed: allGatesPassed,
     compositeScore,
     tradeArmed,
     compositeThreshold: COMPOSITE_THRESHOLD,
