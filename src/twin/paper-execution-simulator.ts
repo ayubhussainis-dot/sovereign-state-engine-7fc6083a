@@ -77,8 +77,8 @@ export class PaperExecutionSimulator {
   constructor(cfg?: Partial<PaperExecutionConfig>) {
     this.cfg = {
       notionalUsdt: 10,
-      stopFrac: 0.0015,
-      targetFrac: 0.003,
+      stopFrac: 0.0015,   // Tight 15 bps stop to cut stalls instantly
+      targetFrac: 0.0065,  // Wide 65 bps runner target to capture 60-70+ expansions
       ...cfg,
     };
   }
@@ -203,4 +203,4 @@ export class PaperExecutionSimulator {
     this.losses = 0;
     this.nextId = 1;
   }
-    }
+}
