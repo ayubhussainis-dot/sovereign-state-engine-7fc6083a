@@ -2,9 +2,14 @@
  * Paper Execution Simulator — deterministic paper execution over real Binance ticks.
  *
  * Contract:
- *   - Opens position at entry (0.00).
- *   - At +15 bps (0.0015), locks stop to entry (breakeven / zero loss).
- *   - At +45 bps (0.0045), closes for a target win.
+ *   - No live exchange calls. No mock data. Uses the real live WS price fed in
+ *     from the harness.
+ *   - Opens ONE position when SOALL all-gates-passed AND fusion verdict
+ *     is directional (LOCKED-BULL → long, LOCKED-BEAR → short).
+ *   - Fixed $10 notional.
+ *   - Initial stop set to a tight 10 bps (0.0010) bare minimum to cut losses fast.
+ *   - Locks stop to breakeven at +15 bps (0.0015) gain so downside risk becomes zero.
+ *   - Closes for a win when target hits +45 bps (0.0045).
  */
 
 export type Side = "long" | "short";
@@ -69,16 +74,16 @@ export class PaperExecutionSimulator {
   private wins = 0;
   private losses = 0;
 
-    constructor(cfg?: Partial<PaperExecutionConfig>) {
+  constructor(cfg?: Partial<PaperExecutionConfig>) {
     this.cfg = {
       notionalUsdt: 10,
-      stopFrac: 0.0020,   // Widened to 20 bps to absorb deeper retests
+      stopFrac: 0.0010,   // Bare-minimum 10 bps initial stop to cut losses fast
       targetFrac: 0.0045,  // Exactly 45 bps target win
       ...cfg,
     };
   }
 
-
+  /** Attempt to open a position. No-op if one is already open. */
   open(signal: OpenSignal): PaperExecutionEvent | null {
     if (this.position) return null;
     if (!Number.isFinite(signal.price) || signal.price <= 0) return null;
@@ -108,20 +113,24 @@ export class PaperExecutionSimulator {
     };
 
     this.position = pos;
+
     return { kind: "FILL", position: pos };
   }
 
+  /** Mark the open position against the latest tick; handles breakeven lock and 45 bps target exits. */
   mark(price: number, ts: number): PaperExecutionEvent | null {
     const pos = this.position;
+
     if (!pos) return null;
     if (!Number.isFinite(price) || price <= 0) return null;
 
+    // Calculate current unrealized gain fraction from entry
     const currentGainFrac =
       pos.side === "long"
         ? (price - pos.entry) / pos.entry
         : (pos.entry - price) / pos.entry;
 
-    // Once it hits +15 bps (0.0015), lock stop to entry (breakeven)
+    // If profit hits +15 bps (+0.0015) and isn't locked yet, snap stop to entry (breakeven)
     if (!pos.breakevenLocked && currentGainFrac >= 0.0015) {
       pos.breakevenLocked = true;
       pos.stop = pos.entry;
@@ -177,11 +186,13 @@ export class PaperExecutionSimulator {
     }
 
     this.position = null;
+
     return { kind: "CLOSE", trade };
   }
 
   stats(): PaperStats {
     const t = this.trades.length;
+
     return {
       trades: t,
       wins: this.wins,
