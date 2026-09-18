@@ -1,54 +1,40 @@
 /**
- * G7 — RISK (ABHMPTD CAPITAL-RESERVE INTEGRATION)
- * Purpose: Evaluates drawdown and capital deployment capacity via your ABHMPTD module.
+ * G7 — RISK
+ * Decision Criterion: pass if DD < DD_max AND L_c < L_max.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
+ *
+ * Delegates to the existing sovereign risk primitives (`evaluateG2`,
+ * `evaluateAuthority`). Both are pure and already in-repo; G7 is the
+ * single auditable entry point for the pipeline.
  */
 
+import { evaluateG2 } from "@/engine/sovereign/g2-checkpoint";
+import { evaluateAuthority } from "@/engine/sovereign/risk-authority";
 import type { Gate, GateOutcome } from "../types";
-import { evaluateABHMPTD } from "@/engine/modules/ab-hmptd";
 
-const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
-
-export const g7Risk: Gate = ({ risk, twin }): GateOutcome => {
-  const drawdownFraction = risk?.drawdownFraction ?? 0;
-  const consecutiveLosses = risk?.consecutiveLosses ?? 0;
-
-  // Evaluate your deterministic ABHMPTD capital-reserve state
-  const abhState = evaluateABHMPTD({
-    capital: risk?.capital ?? 10000,
-    allocatedCapital: risk?.allocatedCapital ?? 1000,
-    workload: twin?.workload ?? 0.3,
-    recovery: risk?.recovery ?? 0.8,
-    environmentalStress: risk?.stress ?? 0.1,
+export const g7Risk: Gate = ({ risk }): GateOutcome => {
+  const ladder = evaluateG2(risk.drawdownFraction);
+  const authority = evaluateAuthority({
+    drawdownFraction: risk.drawdownFraction,
+    consecutiveLosses: risk.consecutiveLosses,
   });
-
-  const baseScore = clamp01(1 - (drawdownFraction * 3.0));
-  let frictionPenalty = 0;
-  
-  if (consecutiveLosses >= 3) frictionPenalty += 0.3;
-  if (abhState.depleted) frictionPenalty += 0.6; // Triggers friction if ABHMPTD flags depletion
-
-  const finalScore = clamp01(baseScore - frictionPenalty);
-  
-  // Hard boundary check using your deployment capacity and depletion flag
-  const isHealthy = finalScore >= 0.50 && !abhState.depleted;
-
+  const passed = ladder.canTrade && authority.canTrade;
   return {
     gate: "G7_RISK",
-    passed: isHealthy,
-    score: finalScore,
-    weight: 2.0,
+    passed,
+    score: passed ? Math.max(0, 1 - risk.drawdownFraction * 10) : 0,
+    weight: 1,
     hardVeto: true,
     evidence: {
-      drawdownFraction,
-      consecutiveLosses,
-      deploymentCapacity: abhState.deploymentCapacity,
-      performanceCapacity: abhState.performanceCapacity,
-      depleted: abhState.depleted
+      drawdownFraction: risk.drawdownFraction,
+      consecutiveLosses: risk.consecutiveLosses,
+      ladderStatus: ladder.status,
+      authorityState: authority.state,
+      sizeMultiplier: ladder.sizeMultiplier,
     },
-    reason: isHealthy
-      ? `risk nominal · ABHMPTD reserve stable · score=${finalScore.toFixed(3)}`
-      : `RISK VETO: ABHMPTD capital reserve depleted or drawdown high · score=${finalScore.toFixed(3)}`,
+    reason: passed
+      ? `${ladder.status} · ${authority.state}`
+      : `${ladder.reason} · ${authority.reason}`,
     specified: true,
   };
 };
