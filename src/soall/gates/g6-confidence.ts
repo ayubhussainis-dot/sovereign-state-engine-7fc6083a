@@ -1,10 +1,13 @@
 /**
- * G6 — CONFIDENCE (F1 TRANSMISSION & SPECTATOR FLOW)
- * Purpose: Pure conviction telemetry observer. Zero blocking, zero friction.
+ * G6 — CONFIDENCE (DYNAMIC TRACTION CONTROL / SOFT VETO)
+ * Purpose: Evaluates driver conviction and market stability. Applies 
+ * mathematical friction when conviction is weak or jitter is dangerously high.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
 import type { Gate, GateOutcome } from "../types";
+
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
 export const g6Confidence: Gate = ({ ppg }): GateOutcome => {
   const volatilityValue = ppg?.volatility?.value ?? 0.01;
@@ -12,24 +15,41 @@ export const g6Confidence: Gate = ({ ppg }): GateOutcome => {
 
   const K1 = 2.0;
   const K2 = 1.0;
-  const rawScore = Math.max(
-    0,
-    1.0 - (K1 * volatilityValue + K2 * Math.abs(ofiValue) * 0.1),
-  );
-  const confidenceScore = rawScore > 0 ? rawScore : 1.0; // Maintain full glide across all jitter states
+  
+  // 1. Base Raw Score (High volatility/jitter reduces raw confidence)
+  const rawScore = 1.0 - (K1 * volatilityValue + K2 * Math.abs(ofiValue) * 0.1);
+  const baseScore = clamp01(rawScore);
+
+  // 2. Apply Structural Friction Penalties
+  let frictionPenalty = 0;
+  
+  // If volatility is spiking (driver losing control / severe jitter), apply drag
+  if (volatilityValue > 0.05) {
+    frictionPenalty += 0.3;
+  }
+
+  // 3. Final Score Calculation (NEVER artificially reward 0)
+  const finalScore = clamp01(baseScore - frictionPenalty);
+
+  // 4. Soft Veto Threshold
+  // Requires at least a 0.3 score to clear without failing the gate
+  const isHealthy = finalScore >= 0.3;
 
   return {
     gate: "G6_CONFIDENCE",
-    passed: true,          // Absolute pass-through: confidence reads conviction, never restricts
-    score: confidenceScore,
-    weight: 1,
-    hardVeto: false,       // Zero veto power, zero resistance
+    passed: isHealthy,     // Fails the gate if the market is erratic
+    score: finalScore,     // Passes the true, penalized score down the pipeline
+    weight: 1.0,           // Equal weight to pull down the composite average
+    hardVeto: false,       // SOFT VETO: Never halts the pipeline instantly
     evidence: {
-      confidenceScore,
+      confidenceScore: finalScore,
       volatility: volatilityValue,
       ofi: ofiValue,
+      frictionPenalty
     },
-    reason: `driver conviction flowing freely · score=${confidenceScore.toFixed(3)} · volatility=${volatilityValue.toFixed(4)} · zero resistance`,
+    reason: isHealthy
+      ? `driver conviction stable · score=${finalScore.toFixed(3)} · vol=${volatilityValue.toFixed(4)}`
+      : `SOFT VETO: erratic jitter/low conviction · score=${finalScore.toFixed(3)} · vol=${volatilityValue.toFixed(4)}`,
     specified: true,
   };
 };
