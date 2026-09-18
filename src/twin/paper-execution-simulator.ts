@@ -7,9 +7,9 @@
  *   - Opens ONE position when SOALL all-gates-passed AND fusion verdict
  *     is directional (LOCKED-BULL → long, LOCKED-BEAR → short).
  *   - Fixed $10 notional.
- *   - Initial stop set to a tight 10 bps (0.0010) bare minimum to cut losses fast.
+ *   - Initial stop set to 17.5 bps (0.00175).
  *   - Locks stop to breakeven at +15 bps (0.0015) gain so downside risk becomes zero.
- *   - Closes for a win when target hits +45 bps (0.0045).
+ *   - Closes for a win when target hits +50 bps (0.0050) for a 35 bps net profit from breakeven.
  *   - Only counts strictly positive PnL trades as wins (filters out $0.00 scratches).
  */
 
@@ -78,8 +78,8 @@ export class PaperExecutionSimulator {
   constructor(cfg?: Partial<PaperExecutionConfig>) {
     this.cfg = {
       notionalUsdt: 10,
-      stopFrac: 0.0010,   // Bare-minimum 10 bps initial stop to cut losses fast
-      targetFrac: 0.0045,  // Exactly 45 bps target win
+      stopFrac: 0.00175,  // 17.5 bps initial stop
+      targetFrac: 0.0050,  // 50 bps total target (giving a 35 bps net win from breakeven)
       ...cfg,
     };
   }
@@ -118,7 +118,7 @@ export class PaperExecutionSimulator {
     return { kind: "FILL", position: pos };
   }
 
-  /** Mark the open position against the latest tick; handles breakeven lock and 45 bps target exits. */
+  /** Mark the open position against the latest tick; handles breakeven lock and 50 bps target exits. */
   mark(price: number, ts: number): PaperExecutionEvent | null {
     const pos = this.position;
 
@@ -180,8 +180,7 @@ export class PaperExecutionSimulator {
     this.trades.push(trade);
     this.cumPnL += gross;
 
-    // Fixed win/loss logic: only actual positive profit counts as a win. 
-    // Zero-dollar scratches stay neutral.
+    // Fixed win/loss logic: only actual positive profit counts as a win.
     if (gross > 0) {
       this.wins++;
     } else if (gross < 0) {
