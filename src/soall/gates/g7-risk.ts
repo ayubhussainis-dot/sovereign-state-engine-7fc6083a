@@ -1,53 +1,54 @@
 /**
- * G7 — RISK (POWERTRAIN CAPACITY & DRAWDOWN GUARDIAN)
- * Purpose: The primary risk boundary gate. Enforces capital deployment capacity and drawdown limits.
+ * G7 — RISK (ABHMPTD CAPITAL-RESERVE INTEGRATION)
+ * Purpose: Evaluates drawdown and capital deployment capacity via your ABHMPTD module.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
-import { evaluateG2 } from "@/engine/sovereign/g2-checkpoint";
-import { evaluateAuthority } from "@/engine/sovereign/risk-authority";
-import { evaluatePowertrain } from "@/engine/modules/powertrain";
 import type { Gate, GateOutcome } from "../types";
+import { evaluateABHMPTD } from "@/engine/modules/ab-hmptd";
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-export const g7Risk: Gate = ({ risk, powertrainInput }): GateOutcome => {
+export const g7Risk: Gate = ({ risk, twin }): GateOutcome => {
   const drawdownFraction = risk?.drawdownFraction ?? 0;
   const consecutiveLosses = risk?.consecutiveLosses ?? 0;
 
-  const ptState = evaluatePowertrain(powertrainInput ?? {
-    maxPower: 100,
-    currentPower: 80,
-    deploymentDemand: 50,
-    temporalRemaining: 1000
+  // Evaluate your deterministic ABHMPTD capital-reserve state
+  const abhState = evaluateABHMPTD({
+    capital: risk?.capital ?? 10000,
+    allocatedCapital: risk?.allocatedCapital ?? 1000,
+    workload: twin?.workload ?? 0.3,
+    recovery: risk?.recovery ?? 0.8,
+    environmentalStress: risk?.stress ?? 0.1,
   });
 
   const baseScore = clamp01(1 - (drawdownFraction * 3.0));
   let frictionPenalty = 0;
   
   if (consecutiveLosses >= 3) frictionPenalty += 0.3;
-  if (ptState.overloaded) frictionPenalty += 0.5;
+  if (abhState.depleted) frictionPenalty += 0.6; // Triggers friction if ABHMPTD flags depletion
 
   const finalScore = clamp01(baseScore - frictionPenalty);
   
-  // HARD BOUNDARY GATE: G7 actively decides pass/fail based on rigorous risk metrics
-  const isHealthy = finalScore >= 0.50 && !ptState.overloaded;
+  // Hard boundary check using your deployment capacity and depletion flag
+  const isHealthy = finalScore >= 0.50 && !abhState.depleted;
 
   return {
     gate: "G7_RISK",
-    passed: isHealthy,     // ACTIVE RISK VETO BOUNDARY
+    passed: isHealthy,
     score: finalScore,
-    weight: 2.0,           // Higher weight to influence final decision
-    hardVoe: true,         // Enforces risk control
+    weight: 2.0,
+    hardVeto: true,
     evidence: {
       drawdownFraction,
       consecutiveLosses,
-      deploymentCapacity: ptState.deploymentCapacity,
-      overloaded: ptState.overloaded
+      deploymentCapacity: abhState.deploymentCapacity,
+      performanceCapacity: abhState.performanceCapacity,
+      depleted: abhState.depleted
     },
     reason: isHealthy
-      ? `risk nominal · powertrain capacity stable · score=${finalScore.toFixed(3)}`
-      : `RISK VETO: drawdown threshold or powertrain overload reached · score=${finalScore.toFixed(3)}`,
+      ? `risk nominal · ABHMPTD reserve stable · score=${finalScore.toFixed(3)}`
+      : `RISK VETO: ABHMPTD capital reserve depleted or drawdown high · score=${finalScore.toFixed(3)}`,
     specified: true,
   };
 };
