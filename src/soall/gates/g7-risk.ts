@@ -1,7 +1,7 @@
 /**
  * G7 — RISK (DYNAMIC TRACTION CONTROL / SOFT VETO)
- * Purpose: Evaluates drawdown and consecutive losses. Applies mathematical
- * friction to cool off the engine after a losing streak, rather than freezing it.
+ * Purpose: Evaluates drawdown and consecutive losses. Applies natural
+ * mathematical feedback without choking the engine flow.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
@@ -21,20 +21,16 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
     consecutiveLosses,
   });
 
-  // 1. Base Score calculation (Decreases linearly with drawdown)
+  // 1. Base Score calculation
   const baseScore = clamp01(1 - (drawdownFraction * 5));
 
-  // 2. Apply Risk Friction Penalties (The Soft Circuit Breaker)
+  // 2. Natural Risk Friction (Original Balanced Flow)
   let frictionPenalty = 0;
 
-  // Cool down the engine heavily even after a single loss in chop
-  if (consecutiveLosses === 1) {
-    frictionPenalty += 0.3;
-  } else if (consecutiveLosses >= 2) {
-    frictionPenalty += 0.6; // Heavier drag to force a stand-down
+  if (consecutiveLosses >= 2) {
+    frictionPenalty += 0.4;
   }
   
-  // Apply maximum drag if the risk authority demands a lockdown
   if (authority.state === "LOCKED_DOWN") {
     frictionPenalty += 0.8;
   }
@@ -42,15 +38,15 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
   // 3. Final Score Calculation
   const finalScore = clamp01(baseScore - frictionPenalty);
 
-  // 4. Soft Veto Threshold
+  // 4. Threshold
   const isHealthy = finalScore >= 0.3;
 
   return {
     gate: "G7_RISK",
-    passed: isHealthy,     // Fails the gate if risk is too high or losing streak is active
-    score: finalScore,     // Passes the heavily penalized score to drag down the composite
-    weight: 1.0,           // Equal weight
-    hardVeto: false,       // SOFT VETO: Prevents the "hard freeze" bug you experienced
+    passed: isHealthy,
+    score: finalScore,
+    weight: 1.0,
+    hardVeto: false,
     evidence: {
       drawdownFraction,
       consecutiveLosses,
