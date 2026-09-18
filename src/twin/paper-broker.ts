@@ -35,8 +35,8 @@ export interface PaperStats {
 
 export interface PaperBrokerConfig {
   notionalUsdt: number;   // capital per trade
-  stopFrac: number;       // e.g. 0.0015 = 15 bps
-  targetFrac: number;     // e.g. 0.0030 = 30 bps
+  stopFrac: number;       // 0.0015 = 15 bps (tight cut on stalls)
+  targetFrac: number;     // 0.0065 = 65 bps (wide runner target for 60-70+ expansions)
 }
 
 export interface OpenSignal {
@@ -64,8 +64,8 @@ export class PaperBroker {
   constructor(cfg?: Partial<PaperBrokerConfig>) {
     this.cfg = {
       notionalUsdt: 100,
-      stopFrac: 0.0015,
-      targetFrac: 0.003,
+      stopFrac: 0.0015,  // Tight 15 bps stop to kill zero-line pullbacks quickly
+      targetFrac: 0.0065, // Wide 65 bps runner target to capture structural 60-70+ expansions
       ...cfg,
     };
   }
@@ -160,7 +160,7 @@ export class PaperBroker {
     };
   }
 
-    recent(n = 20): readonly PaperTrade[] {
+  recent(n = 20): readonly PaperTrade[] {
     return this.trades.slice(-n);
   }
 
