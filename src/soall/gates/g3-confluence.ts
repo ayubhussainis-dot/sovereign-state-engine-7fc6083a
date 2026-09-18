@@ -1,33 +1,42 @@
 /**
- * G3 — CONFLUENCE (ABHMPT MULTI-FACTOR SCORING)
- * Purpose: Evaluates order flow imbalance and conviction via ABHMPT telemetry.
+ * G3 — CONFLUENCE (ABHMPTD SCORING)
+ * Purpose: Evaluates order flow and deployment capacity via your exact original ABHMPTD module.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
 import type { Gate, GateOutcome } from "../types";
-import { evaluateAbHmpt } from "@/engine/modules/ab-hmptd";
+import { evaluateABHMPTD } from "@/engine/modules/ab-hmptd";
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-export const g3Confluence: Gate = ({ ppg, twin }): GateOutcome => {
-  const abhState = evaluateAbHmpt({ twin, ppg });
+export const g3Confluence: Gate = ({ ppg, twin, risk }): GateOutcome => {
+  // Calls your exact original function name and input structure
+  const abhState = evaluateABHMPTD({
+    capital: risk?.capital ?? 10000,
+    allocatedCapital: risk?.allocatedCapital ?? 1000,
+    workload: twin?.workload ?? 0.3,
+    recovery: risk?.recovery ?? 0.8,
+    environmentalStress: risk?.stress ?? 0.1,
+  });
+
   const rawOfi = ppg?.ofi?.value ?? 0;
   const normalizedOfi = Math.min(Math.abs(rawOfi) / 1e9, 1.0);
   
-  const finalScore = clamp01((normalizedOfi * 0.5) + (abhState.conviction * 0.5));
+  const finalScore = clamp01((normalizedOfi * 0.5) + (abhState.performanceCapacity * 0.5));
 
   return {
     gate: "G3_CONFLUENCE",
-    passed: true,          // Non-blocking scoring pass
+    passed: true,          
     score: finalScore,     
     weight: 1.0,           
     hardVeto: false,       
     evidence: {
       ofiProxy: rawOfi,
-      abhConviction: abhState.conviction,
-      regime: abhState.regime
+      deploymentCapacity: abhState.deploymentCapacity,
+      performanceCapacity: abhState.performanceCapacity,
+      depleted: abhState.depleted
     },
-    reason: `ABHMPT confluence scored · conviction=${abhState.conviction.toFixed(3)}`,
+    reason: `ABHMPTD confluence evaluated · deploymentCapacity=${abhState.deploymentCapacity.toFixed(3)}`,
     specified: true,
   };
 };
