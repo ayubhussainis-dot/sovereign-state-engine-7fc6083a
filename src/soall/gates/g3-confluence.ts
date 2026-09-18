@@ -1,47 +1,33 @@
 /**
- * G3 — CONFLUENCE (DYNAMIC TRACTION CONTROL / SOFT VETO)
- * Purpose: Evaluates order flow imbalance and wave confluence with clean flow.
+ * G3 — CONFLUENCE (ABHMPT MULTI-FACTOR SCORING)
+ * Purpose: Evaluates order flow imbalance and conviction via ABHMPT telemetry.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
 import type { Gate, GateOutcome } from "../types";
+import { evaluateAbHmpt } from "@/engine/modules/ab-hmptd";
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-export const g3Confluence: Gate = ({ ppg }): GateOutcome => {
+export const g3Confluence: Gate = ({ ppg, twin }): GateOutcome => {
+  const abhState = evaluateAbHmpt({ twin, ppg });
   const rawOfi = ppg?.ofi?.value ?? 0;
-  const waveState = ppg?.wave?.state ?? "UNKNOWN";
-  
-  // Normalize OFI safely so massive order book depths don't break the math
   const normalizedOfi = Math.min(Math.abs(rawOfi) / 1e9, 1.0);
   
-  // 1. Calculate Base Confluence
-  const baseScore = clamp01(normalizedOfi * 2.0 + 0.5); // Baseline flow
-  
-  // 2. Minimal Friction (Let the engine run free)
-  let frictionPenalty = 0;
-  
-  // 3. Final Score Calculation
-  const finalScore = clamp01(baseScore - frictionPenalty);
-
-  // 4. Balanced Threshold for Smooth Flow
-  const isHealthy = finalScore >= 0.2;
+  const finalScore = clamp01((normalizedOfi * 0.5) + (abhState.conviction * 0.5));
 
   return {
     gate: "G3_CONFLUENCE",
-    passed: isHealthy,     
+    passed: true,          // Non-blocking scoring pass
     score: finalScore,     
     weight: 1.0,           
     hardVeto: false,       
     evidence: {
       ofiProxy: rawOfi,
-      normalizedOfi,
-      waveState,
-      frictionPenalty
+      abhConviction: abhState.conviction,
+      regime: abhState.regime
     },
-    reason: isHealthy
-      ? `confluence aligned · flow nominal · score=${finalScore.toFixed(3)}`
-      : `SOFT VETO: weak confluence · score=${finalScore.toFixed(3)}`,
+    reason: `ABHMPT confluence scored · conviction=${abhState.conviction.toFixed(3)}`,
     specified: true,
   };
 };
