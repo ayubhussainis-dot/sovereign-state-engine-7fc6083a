@@ -1,28 +1,31 @@
 /**
- * G1 — SYNCHRONY (SKIER SPECTATOR PASS-THROUGH)
- * Purpose: Pure telemetry observer. Zero blocking, zero friction.
+ * G1 — SYNCHRONY (100HZ POWERTRAIN CLOCK OBSERVER)
+ * Purpose: Pure telemetry observer validating 100Hz loop synchronization. Non-blocking.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
  */
 
 import type { Gate, GateOutcome } from "../types";
 
-export const g1Synchrony: Gate = ({ twin }): GateOutcome => {
+export const g1Synchrony: Gate = ({ twin, powertrainInput }): GateOutcome => {
   const last = twin?.last;
-  
   const latencyMs = last ? Math.abs(last.latencyMs) : 0;
   
+  const isClockSynchronized = latencyMs <= 35.0;
+  const finalScore = isClockSynchronized ? 1.0 : Math.max(0, 1.0 - (latencyMs / 100.0));
+
   return {
     gate: "G1_SYNCHRONY",
-    passed: true,          // Absolute pass-through: never block the skier
-    score: 1.0,            // Full harmony score, zero drag
-    weight: 1,
-    hardVeto: false,       // Zero veto power
+    passed: true,          // Zero veto power: pure telemetry monitor
+    score: finalScore,     
+    weight: 1.0,
+    hardVeto: false,       
     evidence: { 
       hasTick: !!last,
       latencyMs, 
-      twinSeq: last?.twinSeq ?? -1 
+      twinSeq: last?.twinSeq ?? -1,
+      clock100HzActive: isClockSynchronized
     },
-    reason: `skier gliding freely · latency=${latencyMs}ms · zero resistance`,
+    reason: `100Hz clock monitored · latency=${latencyMs}ms · score=${finalScore.toFixed(3)}`,
     specified: true,
   };
 };
