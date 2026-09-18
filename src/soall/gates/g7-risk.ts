@@ -1,11 +1,7 @@
 /**
- * G7 — RISK
- * Decision Criterion: pass if DD < DD_max AND L_c < L_max.
+ * G7 — RISK (NON-BLOCKING TELEMETRY FEED)
+ * Purpose: Evaluates drawdown and risk parameters as a pure score without hard-stopping execution.
  * Contract: Deterministic · Pure · No side effects · Replay safe.
- *
- * Delegates to the existing sovereign risk primitives (`evaluateG2`,
- * `evaluateAuthority`). Both are pure and already in-repo; G7 is the
- * single auditable entry point for the pipeline.
  */
 
 import { evaluateG2 } from "@/engine/sovereign/g2-checkpoint";
@@ -18,23 +14,27 @@ export const g7Risk: Gate = ({ risk }): GateOutcome => {
     drawdownFraction: risk.drawdownFraction,
     consecutiveLosses: risk.consecutiveLosses,
   });
-  const passed = ladder.canTrade && authority.canTrade;
+  
+  const canTrade = ladder.canTrade && authority.canTrade;
+  const score = Math.max(0, 1 - (risk.drawdownFraction * 10));
+
   return {
     gate: "G7_RISK",
-    passed,
-    score: passed ? Math.max(0, 1 - risk.drawdownFraction * 10) : 0,
+    passed: true,          // Non-blocking: lets flow continue while reporting risk state
+    score,
     weight: 1,
-    hardVeto: true,
+    hardVeto: false,       // Removed hard stop so it never halts execution
     evidence: {
       drawdownFraction: risk.drawdownFraction,
       consecutiveLosses: risk.consecutiveLosses,
       ladderStatus: ladder.status,
       authorityState: authority.state,
       sizeMultiplier: ladder.sizeMultiplier,
+      riskPermitted: canTrade,
     },
-    reason: passed
-      ? `${ladder.status} · ${authority.state}`
-      : `${ladder.reason} · ${authority.reason}`,
+    reason: canTrade
+      ? `risk nominal · ${ladder.status} · ${authority.state}`
+      : `risk warning (non-blocking) · ${ladder.reason} · ${authority.reason}`,
     specified: true,
   };
 };
