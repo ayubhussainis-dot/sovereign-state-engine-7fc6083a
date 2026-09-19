@@ -7,10 +7,9 @@
  *   - Opens ONE position when SOALL all-gates-passed AND fusion verdict
  *     is directional (LOCKED-BULL → long, LOCKED-BEAR → short).
  *   - Fixed $10 notional.
- *   - Initial stop set to 17.5 bps (0.00175).
- *   - Locks stop to breakeven at +15 bps (0.0015) gain so downside risk becomes zero.
- *   - Closes for a win when target hits +45 bps (0.0045).
- *   - Only counts strictly positive PnL trades as wins (filters out $0.00 scratches).
+ *   - Simple directional trade: 15 bps initial stop loss, 30 bps target win.
+ *   - No breakeven locking—pure simple take-profit or stop-loss from entry.
+ *   - Only counts strictly positive PnL trades as wins (filters out zero/losses).
  */
 
 export type Side = "long" | "short";
@@ -24,7 +23,6 @@ export interface PaperPosition {
   qty: number;
   openedAt: number;
   openedTwinSeq: number;
-  breakevenLocked?: boolean;
 }
 
 export interface PaperTrade {
@@ -78,8 +76,8 @@ export class PaperExecutionSimulator {
   constructor(cfg?: Partial<PaperExecutionConfig>) {
     this.cfg = {
       notionalUsdt: 10,
-      stopFrac: 0.00175,  // 17.5 bps initial stop
-      targetFrac: 0.0045,  // Restored to 45 bps target win
+      stopFrac: 0.0015,   // Simple 15 bps loss stop from entry
+      targetFrac: 0.0030,  // Simple 30 bps win target from entry
       ...cfg,
     };
   }
@@ -110,7 +108,6 @@ export class PaperExecutionSimulator {
       qty,
       openedAt: signal.ts,
       openedTwinSeq: signal.twinSeq,
-      breakevenLocked: false,
     };
 
     this.position = pos;
@@ -118,24 +115,12 @@ export class PaperExecutionSimulator {
     return { kind: "FILL", position: pos };
   }
 
-  /** Mark the open position against the latest tick; handles breakeven lock and 45 bps target exits. */
+  /** Mark the open position against the latest tick; handles direct 15 bps stop and 30 bps target exits. */
   mark(price: number, ts: number): PaperExecutionEvent | null {
     const pos = this.position;
 
     if (!pos) return null;
     if (!Number.isFinite(price) || price <= 0) return null;
-
-    // Calculate current unrealized gain fraction from entry
-    const currentGainFrac =
-      pos.side === "long"
-        ? (price - pos.entry) / pos.entry
-        : (pos.entry - price) / pos.entry;
-
-    // If profit hits +15 bps (+0.0015) and isn't locked yet, snap stop to entry (breakeven)
-    if (!pos.breakevenLocked && currentGainFrac >= 0.0015) {
-      pos.breakevenLocked = true;
-      pos.stop = pos.entry;
-    }
 
     let exit: number | null = null;
     let reason: PaperTrade["reason"] | null = null;
@@ -180,7 +165,6 @@ export class PaperExecutionSimulator {
     this.trades.push(trade);
     this.cumPnL += gross;
 
-    // Fixed win/loss logic: only actual positive profit counts as a win.
     if (gross > 0) {
       this.wins++;
     } else if (gross < 0) {
