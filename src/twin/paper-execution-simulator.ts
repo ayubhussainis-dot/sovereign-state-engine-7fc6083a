@@ -7,7 +7,7 @@
  *   - Opens ONE position when SOALL all-gates-passed AND fusion verdict
  *     is directional (LOCKED-BULL → long, LOCKED-BEAR → short).
  *   - Fixed $10 notional.
- *   - Simple directional trade: 15 bps initial stop loss, 30 bps target win.
+ *   - Simple directional trade: 20 bps initial stop loss, 40 bps target win.
  *   - No breakeven locking—pure simple take-profit or stop-loss from entry.
  *   - Only counts strictly positive PnL trades as wins (filters out zero/losses).
  */
@@ -76,8 +76,8 @@ export class PaperExecutionSimulator {
   constructor(cfg?: Partial<PaperExecutionConfig>) {
     this.cfg = {
       notionalUsdt: 10,
-      stopFrac: 0.0015,   // Simple 15 bps loss stop from entry
-      targetFrac: 0.0030,  // Simple 30 bps win target from entry
+      stopFrac: 0.0020,   // Adjusted to 20 bps loss stop from entry
+      targetFrac: 0.0040,  // Adjusted to 40 bps win target from entry
       ...cfg,
     };
   }
@@ -115,7 +115,7 @@ export class PaperExecutionSimulator {
     return { kind: "FILL", position: pos };
   }
 
-  /** Mark the open position against the latest tick; handles direct 15 bps stop and 30 bps target exits. */
+  /** Mark the open position against the latest tick; handles direct 20 bps stop and 40 bps target exits. */
   mark(price: number, ts: number): PaperExecutionEvent | null {
     const pos = this.position;
 
