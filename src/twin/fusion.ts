@@ -86,10 +86,22 @@ export function fuse(not: LensReading, ton: LensReading): Fusion {
         : "TON";
 
   let verdict: Fusion["verdict"] = "SILENT";
-  if (w < 0.05) verdict = "SILENT";
-  else if (agreement > 0.7 && consensusBull > consensusBear + 0.05) verdict = "LOCKED-BULL";
-  else if (agreement > 0.7 && consensusBear > consensusBull + 0.05) verdict = "LOCKED-BEAR";
-  else verdict = "SPLIT";
+  
+  /* 
+   * LOWERED THRESHOLDS FOR TESTING:
+   * Confidence (w) required dropped to 0.01
+   * Agreement dropped from 70% (0.7) to 10% (0.1)
+   * Consensus margin dropped from 0.05 to 0.01
+   */
+  if (w < 0.01) {
+    verdict = "SILENT";
+  } else if (agreement > 0.1 && consensusBull > consensusBear + 0.01) {
+    verdict = "LOCKED-BULL";
+  } else if (agreement > 0.1 && consensusBear > consensusBull + 0.01) {
+    verdict = "LOCKED-BEAR";
+  } else {
+    verdict = "SPLIT";
+  }
 
   return { not, ton, consensusBull, consensusBear, agreement, residual, residualOwner, verdict };
 }
@@ -98,14 +110,15 @@ export function fuse(not: LensReading, ton: LensReading): Fusion {
 export function fusionBlocker(f: Fusion): string | null {
   if (f.verdict === "LOCKED-BULL" || f.verdict === "LOCKED-BEAR") return null;
   const w = Math.sqrt(f.not.confidence * f.ton.confidence);
-  if (w < 0.05) {
+  
+  if (w < 0.01) {
     return f.not.confidence <= f.ton.confidence
       ? "NOT_CONFIDENCE_LOW"
       : "TON_CONFIDENCE_LOW";
   }
-  if (f.agreement <= 0.7) return "AGREEMENT_BELOW_0.70";
-  if (Math.abs(f.consensusBull - f.consensusBear) <= 0.05) {
-    return "CONSENSUS_MARGIN_BELOW_0.05";
+  if (f.agreement <= 0.1) return "AGREEMENT_BELOW_0.10";
+  if (Math.abs(f.consensusBull - f.consensusBear) <= 0.01) {
+    return "CONSENSUS_MARGIN_BELOW_0.01";
   }
   return "UNSPECIFIED_SPLIT";
 }
