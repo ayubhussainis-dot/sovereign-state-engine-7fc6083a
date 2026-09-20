@@ -2,43 +2,134 @@
  * G1 — SYNCHRONY
  *
  * Validates live-twin synchronization.
- * Synchronization loss is a true execution veto.
+ *
+ * Synchronization states:
+ *   <= 35ms   = synchronized
+ *   35-100ms  = degraded but executable
+ *   > 100ms   = true execution veto
+ *
+ * G1 remains a genuine safety gate.
+ * Ordinary network/feed latency must not freeze execution.
+ *
+ * Contract:
+ *   Deterministic · Pure · No side effects · Replay safe.
  */
 
 import type { Gate, GateOutcome } from "../types";
 
-export const g1Synchrony: Gate = ({ twin }): GateOutcome => {
+const SYNCHRONIZED_LATENCY_MS = 35.0;
+const MAX_EXECUTION_LATENCY_MS = 100.0;
+
+const clamp01 = (value: number): number =>
+  Math.max(0, Math.min(1, value));
+
+export const g1Synchrony: Gate = ({
+  twin,
+}): GateOutcome => {
   const last = twin?.last;
 
   const latencyMs = last
     ? Math.abs(last.latencyMs)
     : Number.POSITIVE_INFINITY;
 
-  const isClockSynchronized = latencyMs <= 35.0;
+  const hasTick = !!last;
 
-  const finalScore = isClockSynchronized
-    ? 1.0
-    : Math.max(0, 1.0 - latencyMs / 100.0);
+  /*
+   * Normal synchronization.
+   */
+  const isClockSynchronized =
+    hasTick &&
+    Number.isFinite(latencyMs) &&
+    latencyMs <= SYNCHRONIZED_LATENCY_MS;
+
+  /*
+   * Execution remains safe while latency is
+   * within the maximum tolerated boundary.
+   */
+  const executionSafe =
+    hasTick &&
+    Number.isFinite(latencyMs) &&
+    latencyMs <= MAX_EXECUTION_LATENCY_MS;
+
+  /*
+   * G1 only becomes a hard veto when:
+   *
+   *   - there is no usable tick, or
+   *   - latency exceeds 100ms.
+   */
+  const passed = executionSafe;
+
+  const hardVeto = !executionSafe;
+
+  /*
+   * Continuous synchronization score.
+   */
+  const finalScore =
+    Number.isFinite(latencyMs)
+      ? clamp01(
+          1 -
+            latencyMs /
+              MAX_EXECUTION_LATENCY_MS,
+        )
+      : 0;
 
   return {
     gate: "G1_SYNCHRONY",
-    passed: isClockSynchronized,
-    score: finalScore,
+
+    passed,
+
+    score:
+      isClockSynchronized
+        ? 1.0
+        : finalScore,
+
     weight: 1.0,
-    hardVeto: !isClockSynchronized,
+
+    hardVeto,
 
     evidence: {
-      hasTick: !!last,
-      latencyMs: Number.isFinite(latencyMs) ? latencyMs : -1,
-      twinSeq: last?.twinSeq ?? -1,
-      clock100HzActive: isClockSynchronized,
+      hasTick,
+
+      latencyMs:
+        Number.isFinite(latencyMs)
+          ? latencyMs
+          : -1,
+
+      isClockSynchronized,
+
+      executionSafe,
+
+      synchronizedThresholdMs:
+        SYNCHRONIZED_LATENCY_MS,
+
+      maxExecutionLatencyMs:
+        MAX_EXECUTION_LATENCY_MS,
+
+      twinSeq:
+        last?.twinSeq ?? -1,
+
+      clock100HzActive:
+        isClockSynchronized,
     },
 
-    reason: isClockSynchronized
-      ? `Clock synchronized · latency=${latencyMs.toFixed(2)}ms · score=${finalScore.toFixed(3)}`
-      : `Clock UNSYNCHRONIZED · latency=${
-          Number.isFinite(latencyMs) ? latencyMs.toFixed(2) : "NO_TICK"
-        }ms · EXECUTION VETO`,
+    reason:
+      isClockSynchronized
+        ? `Clock synchronized · latency=${latencyMs.toFixed(
+            2,
+          )}ms · score=${finalScore.toFixed(
+            3,
+          )}`
+        : executionSafe
+          ? `Clock degraded · latency=${latencyMs.toFixed(
+              2,
+            )}ms · execution permitted · score=${finalScore.toFixed(
+              3,
+            )}`
+          : `Clock UNSYNCHRONIZED · latency=${
+              Number.isFinite(latencyMs)
+                ? latencyMs.toFixed(2)
+                : "NO_TICK"
+            }ms · EXECUTION VETO`,
 
     specified: true,
   };
