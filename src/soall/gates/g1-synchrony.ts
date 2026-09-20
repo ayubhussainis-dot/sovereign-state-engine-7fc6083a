@@ -52,14 +52,12 @@ export const g1Synchrony: Gate = ({
     latencyMs <= MAX_EXECUTION_LATENCY_MS;
 
   /*
-   * G1 only becomes a hard veto when:
-   *
-   *   - there is no usable tick, or
-   *   - latency exceeds 100ms.
+   * G1 only becomes a hard veto when a tick exists and latency exceeds 100ms.
+   * If there is no tick yet during startup/initialization, allow execution instead of hard vetoing.
    */
-  const passed = executionSafe;
+  const passed = hasTick ? executionSafe : true;
 
-  const hardVeto = !executionSafe;
+  const hardVeto = hasTick ? !executionSafe : false;
 
   /*
    * Continuous synchronization score.
@@ -71,7 +69,7 @@ export const g1Synchrony: Gate = ({
             latencyMs /
               MAX_EXECUTION_LATENCY_MS,
         )
-      : 0;
+      : 1.0;
 
   return {
     gate: "G1_SYNCHRONY",
@@ -112,8 +110,9 @@ export const g1Synchrony: Gate = ({
         isClockSynchronized,
     },
 
-    reason:
-      isClockSynchronized
+    reason: !hasTick
+      ? `Awaiting initial tick · connection pending`
+      : isClockSynchronized
         ? `Clock synchronized · latency=${latencyMs.toFixed(
             2,
           )}ms · score=${finalScore.toFixed(
