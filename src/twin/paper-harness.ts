@@ -8,6 +8,7 @@
  *     -> Internal Market
  *     -> Twin Snapshot
  *     -> PPG
+ *     -> F1 Telemetry Bridge (AB-HMPTD & Powertrain) 
  *     -> Existing Position Mark
  *     -> Risk State Update
  *     -> SOALL G1..G8
@@ -39,6 +40,13 @@ import {
 } from "./paper-execution-simulator";
 import { checkpoint, type T9Checkpoint } from "@/tix/t9";
 
+// ============================================================================
+// F1 INTEGRATION BRIDGES
+// Translates financial reality into production-ready vehicle deterministic logic
+// ============================================================================
+import { evaluateABHMPTDBridge } from "@/engine/modules/ab-hmptd-bridge";
+import { evaluatePowertrainBridge } from "@/engine/modules/powertrain-bridge";
+
 export interface HarnessCycle {
   twin: TwinSnapshot;
   ppg: PPGSnapshot;
@@ -57,17 +65,8 @@ export interface HarnessTickInput {
   ask?: number;
   side?: LiveTick["side"];
 
-  /**
-   * Explicit directional intent from the Fusion layer.
-   *
-   * Only "long" or "short" can open a position.
-   * "flat" means no directional trade.
-   */
   intent?: Side | "flat";
 
-  /**
-   * Diagnostic from the Fusion layer.
-   */
   fusion?: {
     verdict: string;
     agreement: number;
@@ -99,6 +98,9 @@ export class PaperHarness {
     consecutiveLosses: 0,
     systemHealth: "NORMAL",
   };
+
+  // Base arbitrary capital for F1 bridge calculations (assuming $1000 start)
+  private readonly BASE_CAPITAL = 1000;
 
   constructor(symbol = "BTCUSDT") {
     this.symbol = symbol;
@@ -145,14 +147,12 @@ export class PaperHarness {
     };
 
     const tick = this.market.append(live);
-
     const twin = this.market.snapshot();
 
     const tixT9: T9Checkpoint[] = [
       checkpoint("MARKET", tick.twinSeq, {
         status: "PARSED",
       }),
-
       checkpoint("DIGITAL_TWIN", tick.twinSeq, {
         status: "OBSERVED",
       }),
@@ -192,15 +192,12 @@ export class PaperHarness {
 
     /*
      * 1. Mark the existing position first.
-     *
-     * The current market tick is allowed to close
-     * an existing position before a new authority
-     * decision is made.
      */
     const markEv = this.paper.mark(
       tick.price,
       tick.ts,
     );
+    const currentStats = this.paper.stats();
 
     if (
       markEv &&
@@ -230,11 +227,41 @@ export class PaperHarness {
     }
 
     /*
+     * 1.5. F1 TELEMETRY INTEGRATION
+     * Evaluate the physical vehicle state using financial inputs.
+     */
+    const currentCapital = this.BASE_CAPITAL + currentStats.cumPnL;
+    const allocated = currentStats.openPosition ? currentStats.openPosition.qty * tick.price : 0;
+    
+    // Map PPG and Network logic to physical stress
+    const mappedEnvironmentalStress = Math.min(1, tick.latencyMs / 500); 
+    const mappedWorkload = Math.min(1, ppg.volatility.value * 10);
+    const mappedRecovery = this.risk.consecutiveLosses === 0 ? 1.0 : 0.0;
+
+    const hmptdState = evaluateABHMPTDBridge({
+      capital: currentCapital,
+      allocatedCapital: allocated,
+      workload: mappedWorkload,
+      recovery: mappedRecovery,
+      environmentalStress: mappedEnvironmentalStress,
+    });
+
+    const powertrainState = evaluatePowertrainBridge({
+      capitalCapacity: currentCapital,
+      currentExposure: allocated,
+    });
+
+    // If the human-machine buffer is depleted, physically block the system
+    if (hmptdState.depleted) {
+      this.risk.systemHealth = "LOCKED_DOWN";
+    } else {
+      // Allow normal trading state to resume if F1 health is stable
+      this.risk.systemHealth = "NORMAL";
+    }
+
+    /*
      * 2. Run SOALL using the latest risk state.
-     *
-     * This is important:
-     * a newly realized loss is visible to G7
-     * before another position can be opened.
+     * G7 will now definitively hard-veto if the F1 bridge set systemHealth to LOCKED_DOWN.
      */
     const report = runPipeline({
       twin,
@@ -251,13 +278,6 @@ export class PaperHarness {
 
     /*
      * 3. Resolve Fusion direction.
-     *
-     * Direction comes only from:
-     *   - explicit directional intent, or
-     *   - explicit LOCKED-BULL / LOCKED-BEAR verdict.
-     *
-     * No direction is manufactured from
-     * consensusBull / consensusBear.
      */
     const fusionVerdict =
       input.fusion?.verdict ?? "SILENT";
@@ -279,24 +299,12 @@ export class PaperHarness {
       explicitIntent ??
       fusionDirection;
 
-    /*
-     * Prevent contradictory explicit intent
-     * from overriding a directional Fusion verdict.
-     */
     const directionAgrees =
       fusionDirection === null ||
       dir === fusionDirection;
 
     /*
      * 4. Final execution eligibility.
-     *
-     * report.allPassed is intentionally NOT used.
-     *
-     * G2..G6 are quality gates.
-     *
-     * G1/G7 are safety gates.
-     *
-     * G8 is final authority.
      */
     const executionAuthorized =
       report.tradeArmed &&
@@ -324,6 +332,8 @@ export class PaperHarness {
         ),
       );
 
+      // In the future, powertrainState.usableCapitalFraction can be used here 
+      // to dynamically scale the trade size instead of a static allocation.
       const fill = this.paper.open({
         side: dir,
         price: tick.price,
@@ -352,11 +362,9 @@ export class PaperHarness {
       }
     } else {
       /*
-       * 5. Record the actual reason execution
-       * was not attempted.
+       * 5. Record the actual reason execution was not attempted.
        */
       let blockedBy: string;
-
       let detail: Record<string, unknown>;
 
       if (report.failedAt) {
@@ -377,6 +385,7 @@ export class PaperHarness {
             report.tradeArmed,
           consecutiveLosses:
             this.risk.consecutiveLosses,
+          f1Depleted: hmptdState.depleted // Expose F1 state in audit log
         };
       } else if (!report.tradeArmed) {
         const authorityOutcome =
@@ -537,7 +546,6 @@ export class PaperHarness {
     this.market.reset();
     this.ledger.reset();
     this.paper.reset();
-
     this.welford.reset();
 
     this.risk = {
@@ -546,4 +554,4 @@ export class PaperHarness {
       systemHealth: "NORMAL",
     };
   }
-  }
+}
