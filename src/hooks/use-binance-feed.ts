@@ -1,7 +1,7 @@
 /**
  * Binance Futures live-trade WebSocket — singleton client hook.
  *
- * One shared WS per symbol (default BTCUSDT) across the whole app,
+ * One shared WS per symbol across the whole app,
  * so Header/Hero/Today share connection state and last price.
  * Fires-and-forgets subscribers; safe under React StrictMode.
  */
@@ -15,6 +15,7 @@ interface FeedState {
   lastQty: number | null;
   lastSide: "buy" | "sell" | null;
   lastTs: number | null;
+  latencyMs: number;
 }
 
 interface Feed {
@@ -52,12 +53,15 @@ function open(symbol: string) {
         T?: number;
       };
       if (msg.p) {
+        const now = Date.now();
+        const tradeTs = msg.T ?? now;
         feed.state = {
           status: "open",
           lastPrice: +msg.p,
           lastQty: msg.q ? +msg.q : 0,
           lastSide: msg.m === true ? "sell" : "buy",
-          lastTs: msg.T ?? Date.now(),
+          lastTs: tradeTs,
+          latencyMs: Math.max(0, now - tradeTs),
         };
         emit(feed);
       }
@@ -67,7 +71,7 @@ function open(symbol: string) {
   };
   const retry = () => {
     feed.ws = null;
-    feed.state = { ...feed.state, status: "closed" };
+    feed.state = { ...feed.state, status: "closed", latencyMs: Number.POSITIVE_INFINITY };
     emit(feed);
     if (feed.refCount > 0) {
       feed.reconnectTimer = setTimeout(() => open(symbol), 2000);
@@ -87,6 +91,7 @@ export function useBinanceTrade(symbol = "BTCUSDT"): FeedState {
         lastQty: null,
         lastSide: null,
         lastTs: null,
+        latencyMs: Number.POSITIVE_INFINITY,
       }
     );
   });
@@ -102,6 +107,7 @@ export function useBinanceTrade(symbol = "BTCUSDT"): FeedState {
           lastQty: null,
           lastSide: null,
           lastTs: null,
+          latencyMs: Number.POSITIVE_INFINITY,
         },
         subs: new Set(),
         refCount: 0,
