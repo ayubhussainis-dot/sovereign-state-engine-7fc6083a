@@ -13,6 +13,14 @@
  *     -> Paper Execution
  *
  * No live exchange orders are sent.
+ *
+ * Execution authority:
+ *   - G1 = hard synchronization safety veto
+ *   - G2..G6 = quality gates
+ *   - G7 = hard risk veto
+ *   - G8 = final authority
+ *
+ * G2..G6 do not independently block paper execution.
  */
 
 import { InternalMarket } from "./internal-market";
@@ -74,10 +82,14 @@ export interface HarnessTickInput {
 export class PaperHarness {
   readonly symbol: string;
 
-  private readonly market = new InternalMarket({ capacity: 4096 });
+  private readonly market = new InternalMarket({
+    capacity: 4096,
+  });
+
   private readonly welford = new Welford();
 
   readonly ledger = new AuditLedger(4096);
+
   readonly paper = new PaperExecutionSimulator();
 
   private risk: RiskContext = {
@@ -91,7 +103,10 @@ export class PaperHarness {
   }
 
   setRisk(risk: Partial<RiskContext>): void {
-    this.risk = { ...this.risk, ...risk };
+    this.risk = {
+      ...this.risk,
+      ...risk,
+    };
   }
 
   ingest(input: HarnessTickInput): HarnessCycle {
@@ -106,18 +121,23 @@ export class PaperHarness {
     };
 
     const tick = this.market.append(live);
+
     const twin = this.market.snapshot();
 
     const tixT9: T9Checkpoint[] = [
       checkpoint("MARKET", tick.twinSeq, {
         status: "PARSED",
       }),
+
       checkpoint("DIGITAL_TWIN", tick.twinSeq, {
         status: "OBSERVED",
       }),
     ];
 
-    const ppg = profile({ twin }, this.welford);
+    const ppg = profile(
+      { twin },
+      this.welford,
+    );
 
     tixT9.push(
       checkpoint("JACK_JOKER", tick.twinSeq, {
@@ -153,7 +173,10 @@ export class PaperHarness {
     );
 
     entries.push(
-      this.ledger.appendGateReport(tick.ts, report),
+      this.ledger.appendGateReport(
+        tick.ts,
+        report,
+      ),
     );
 
     /*
@@ -167,28 +190,35 @@ export class PaperHarness {
       tick.ts,
     );
 
-    if (markEv && markEv.kind === "CLOSE") {
+    if (
+      markEv &&
+      markEv.kind === "CLOSE"
+    ) {
       entries.push(
-        this.ledger.append("TRADE_CLOSED", tick.ts, {
-          id: markEv.trade.id,
-          side: markEv.trade.side,
-          entry: markEv.trade.entry,
-          exit: markEv.trade.exit,
-          qty: markEv.trade.qty,
-          pnl: markEv.trade.pnl,
-          reason: markEv.trade.reason,
-        }),
+        this.ledger.append(
+          "TRADE_CLOSED",
+          tick.ts,
+          {
+            id: markEv.trade.id,
+            side: markEv.trade.side,
+            entry: markEv.trade.entry,
+            exit: markEv.trade.exit,
+            qty: markEv.trade.qty,
+            pnl: markEv.trade.pnl,
+            reason: markEv.trade.reason,
+          },
+        ),
       );
     }
 
     /*
      * 2. Resolve Fusion direction.
      *
-     * Direction is now accepted only from an explicit
-     * directional Fusion verdict or an explicit intent
-     * supplied by the Fusion layer.
+     * Direction comes only from:
+     *   - explicit directional intent, or
+     *   - explicit LOCKED-BULL / LOCKED-BEAR verdict.
      *
-     * No direction is manufactured from consensusBull.
+     * No direction is manufactured from consensusBull/Bear.
      */
     const fusionVerdict =
       input.fusion?.verdict ?? "SILENT";
@@ -201,46 +231,60 @@ export class PaperHarness {
           : null;
 
     const explicitIntent: Side | null =
-      input.intent === "long" || input.intent === "short"
+      input.intent === "long" ||
+      input.intent === "short"
         ? input.intent
         : null;
 
     /*
-     * The explicit Fusion intent is preferred when present.
+     * Explicit Fusion intent is preferred.
      * Otherwise use the directional Fusion verdict.
      */
     const dir: Side | null =
-      explicitIntent ?? fusionDirection;
+      explicitIntent ??
+      fusionDirection;
 
     /*
-     * Prevent a contradictory explicit intent from
-     * overriding a directional Fusion verdict.
+     * Prevent contradictory intent from overriding
+     * a directional Fusion verdict.
      */
     const directionAgrees =
       fusionDirection === null ||
       dir === fusionDirection;
 
     /*
-     * 3. Paper entry.
+     * 3. Determine final execution eligibility.
      *
-     * A position can open only when:
-     *   - every SOALL gate passes
-     *   - Fusion is directional
-     *   - direction is consistent with Fusion
+     * IMPORTANT:
+     *
+     * report.allPassed is NOT used here.
+     *
+     * G2..G6 are quality gates and may fail.
+     *
+     * report.tradeArmed is the SOALL/G8 authority result.
      */
-    if (
-      report.allPassed &&
+    const executionAuthorized =
+      report.tradeArmed &&
       dir !== null &&
-      directionAgrees
-    ) {
+      directionAgrees;
+
+    if (executionAuthorized) {
       entries.push(
-        this.ledger.append("ORDER_INTENT", tick.ts, {
-          twinSeq: tick.twinSeq,
-          mode: "PAPER",
-          price: tick.price,
-          intent: dir,
-          fusionVerdict,
-        }),
+        this.ledger.append(
+          "ORDER_INTENT",
+          tick.ts,
+          {
+            twinSeq: tick.twinSeq,
+            mode: "PAPER",
+            price: tick.price,
+            intent: dir,
+            fusionVerdict,
+            soallTradeArmed:
+              report.tradeArmed,
+            allGatesPassed:
+              report.allPassed,
+          },
+        ),
       );
 
       const fill = this.paper.open({
@@ -250,96 +294,136 @@ export class PaperHarness {
         twinSeq: tick.twinSeq,
       });
 
-      if (fill && fill.kind === "FILL") {
+      if (
+        fill &&
+        fill.kind === "FILL"
+      ) {
         entries.push(
-          this.ledger.append("ORDER_FILLED", tick.ts, {
-            id: fill.position.id,
-            side: fill.position.side,
-            entry: fill.position.entry,
-            stop: fill.position.stop,
-            target: fill.position.target,
-            qty: fill.position.qty,
-          }),
+          this.ledger.append(
+            "ORDER_FILLED",
+            tick.ts,
+            {
+              id: fill.position.id,
+              side: fill.position.side,
+              entry: fill.position.entry,
+              stop: fill.position.stop,
+              target: fill.position.target,
+              qty: fill.position.qty,
+            },
+          ),
         );
       }
-    } else if (
-      report.failedAt === "G7_RISK" ||
-      report.failedAt === "G8_AUTHORITY"
-    ) {
-      entries.push(
-        this.ledger.append("AUTHORITY_VETO", tick.ts, {
-          twinSeq: tick.twinSeq,
-          failedAt: report.failedAt,
-        }),
-      );
-    }
-
-    /*
-     * 4. Journal why no position is open.
-     */
-    if (!this.paper.stats().openPosition) {
+    } else {
+      /*
+       * 4. Record the actual reason execution
+       * was not attempted.
+       *
+       * Priority:
+       *   1. Genuine SOALL hard veto
+       *   2. SOALL authority not armed
+       *   3. No Fusion direction
+       *   4. Direction conflict
+       */
       let blockedBy: string;
+
       let detail: Record<string, unknown>;
 
       if (report.failedAt) {
-        blockedBy = `HARD_VETO:${report.failedAt}`;
+        const failedGate =
+          report.outcomes.find(
+            (o) =>
+              o.gate === report.failedAt,
+          );
+
+        blockedBy =
+          `HARD_VETO:${report.failedAt}`;
 
         detail = {
           reason:
-            report.outcomes.find(
-              (o) => o.gate === report.failedAt,
-            )?.reason ?? "",
+            failedGate?.reason ?? "",
+          hardVeto: true,
+          tradeArmed:
+            report.tradeArmed,
         };
       } else if (!report.tradeArmed) {
-        const weakest = report.outcomes.reduce(
-          (a, b) => (b.score < a.score ? b : a),
-        );
+        const authorityOutcome =
+          report.outcomes.find(
+            (o) =>
+              o.gate ===
+              "G8_AUTHORITY",
+          );
 
-        blockedBy = "COMPOSITE_BELOW_THRESHOLD";
+        blockedBy =
+          "SOALL_NOT_ARMED";
 
         detail = {
-          composite: report.compositeScore,
-          threshold: report.compositeThreshold,
-          weakestGate: weakest.gate,
-          weakestScore: weakest.score,
-          weakestReason: weakest.reason,
+          tradeArmed:
+            report.tradeArmed,
+          authorityPassed:
+            authorityOutcome?.passed ??
+            false,
+          composite:
+            report.compositeScore,
+          threshold:
+            report.compositeThreshold,
         };
       } else if (!dir) {
-        blockedBy = `FUSION:${input.fusion?.blocker ?? "NO_DIRECTION"}`;
+        blockedBy =
+          `FUSION:${
+            input.fusion?.blocker ??
+            "NO_DIRECTION"
+          }`;
 
         detail = {
           verdict: fusionVerdict,
-          agreement: input.fusion?.agreement,
-          consensusBull: input.fusion?.consensusBull,
-          consensusBear: input.fusion?.consensusBear,
-          notAxis: input.fusion?.notAxis,
-          tonAxis: input.fusion?.tonAxis,
-          notConfidence: input.fusion?.notConfidence,
-          tonConfidence: input.fusion?.tonConfidence,
+          agreement:
+            input.fusion?.agreement,
+          consensusBull:
+            input.fusion?.consensusBull,
+          consensusBear:
+            input.fusion?.consensusBear,
+          notAxis:
+            input.fusion?.notAxis,
+          tonAxis:
+            input.fusion?.tonAxis,
+          notConfidence:
+            input.fusion?.notConfidence,
+          tonConfidence:
+            input.fusion?.tonConfidence,
         };
       } else if (!directionAgrees) {
-        blockedBy = "FUSION:DIRECTION_CONFLICT";
+        blockedBy =
+          "FUSION:DIRECTION_CONFLICT";
 
         detail = {
           fusionVerdict,
           fusionDirection,
           explicitIntent,
-          resolvedDirection: dir,
+          resolvedDirection:
+            dir,
         };
       } else {
-        blockedBy = "PAPER_EXECUTION_REJECTED";
+        blockedBy =
+          "PAPER_EXECUTION_REJECTED";
 
         detail = {
           intent: dir,
+          tradeArmed:
+            report.tradeArmed,
+          fusionVerdict,
         };
       }
 
       entries.push(
-        this.ledger.append("EXEC_BLOCK", tick.ts, {
-          twinSeq: tick.twinSeq,
-          blockedBy,
-          ...detail,
-        }),
+        this.ledger.append(
+          "EXEC_BLOCK",
+          tick.ts,
+          {
+            twinSeq: tick.twinSeq,
+            blockedBy,
+            ...detail,
+          },
+        ),
       );
     }
 
@@ -354,33 +438,54 @@ export class PaperHarness {
           : "NEUTRAL";
 
     tixT9.push(
-      checkpoint("FUSION", tick.twinSeq, {
-        direction,
-        status: fusionVerdict,
-      }),
+      checkpoint(
+        "FUSION",
+        tick.twinSeq,
+        {
+          direction,
+          status: fusionVerdict,
+        },
+      ),
 
-      checkpoint("SOALL", tick.twinSeq, {
-        direction,
-        status: report.tradeArmed
-          ? "ARMED"
-          : report.failedAt ?? "STANDBY",
-      }),
+      checkpoint(
+        "SOALL",
+        tick.twinSeq,
+        {
+          direction,
+          status: report.tradeArmed
+            ? "ARMED"
+            : report.failedAt ??
+              "STANDBY",
+        },
+      ),
 
-      checkpoint("RISK_AUTHORITY", tick.twinSeq, {
-        direction,
-        status:
-          report.failedAt === "G7_RISK" ||
-          report.failedAt === "G8_AUTHORITY"
-            ? "VETO"
-            : "OBSERVED",
-      }),
+      checkpoint(
+        "RISK_AUTHORITY",
+        tick.twinSeq,
+        {
+          direction,
+          status:
+            report.failedAt ===
+              "G7_RISK" ||
+            report.failedAt ===
+              "G8_AUTHORITY"
+              ? "VETO"
+              : "OBSERVED",
+        },
+      ),
 
-      checkpoint("PAPER_EXECUTION", tick.twinSeq, {
-        direction,
-        status: this.paper.stats().openPosition
-          ? "OPEN"
-          : "FLAT",
-      }),
+      checkpoint(
+        "PAPER_EXECUTION",
+        tick.twinSeq,
+        {
+          direction,
+          status:
+            this.paper.stats()
+              .openPosition
+              ? "OPEN"
+              : "FLAT",
+        },
+      ),
     );
 
     return {
@@ -399,4 +504,4 @@ export class PaperHarness {
     this.paper.reset();
     this.welford.reset();
   }
-                           }
+        }
