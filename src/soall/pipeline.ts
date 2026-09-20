@@ -7,6 +7,19 @@
  * Every gate is evaluated so the complete report can be
  * recorded in the audit ledger.
  *
+ * Authority model:
+ *
+ *   G1 = safety veto
+ *   G2 = quality
+ *   G3 = quality
+ *   G4 = quality
+ *   G5 = quality
+ *   G6 = quality
+ *   G7 = safety veto
+ *   G8 = final authority
+ *
+ * G2..G6 may fail without independently blocking execution.
+ *
  * Contract:
  *   Deterministic · Pure · Replay safe.
  */
@@ -44,10 +57,10 @@ const PIPELINE: readonly Gate[] = [
 ];
 
 /*
- * Composite score is currently diagnostic.
+ * Composite score is diagnostic.
  *
- * We are not using the composite score as an additional
- * trading restriction until the system is calibrated.
+ * G2..G6 contribute to this score, but the composite
+ * is not currently an additional trading restriction.
  */
 const COMPOSITE_THRESHOLD = 0.0;
 
@@ -63,22 +76,26 @@ export function runPipeline(
   const outcomes: GateOutcome[] = [];
 
   /*
-   * Stores the gates that have actually passed.
+   * Stores gates that actually passed.
    *
-   * G8 receives this cumulative pass vector.
+   * G8 uses this vector to verify the mandatory
+   * safety gates G1 and G7.
    */
   const priorPasses: GateId[] = [];
 
   /*
-   * First hard-veto failure.
+   * First genuine hard-veto failure.
+   *
+   * G2..G6 cannot populate this because they are
+   * quality gates with hardVeto=false.
    */
   let failedAt: GateId | null = null;
 
   /*
    * Run G1 through G8 in strict order.
    *
-   * We intentionally continue through G8 so that the final
-   * authority decision and complete gate report are available.
+   * Every gate runs so the complete audit report
+   * remains available even when a safety gate fails.
    */
   for (const gate of PIPELINE) {
     const gateInputs: GateInputs = {
@@ -93,7 +110,7 @@ export function runPipeline(
     outcomes.push(outcome);
 
     /*
-     * Record the first hard-veto failure.
+     * Record the first actual hard-veto failure.
      */
     if (
       !outcome.passed &&
@@ -104,7 +121,8 @@ export function runPipeline(
     }
 
     /*
-     * Only passed gates enter the cumulative pass vector.
+     * Only passed gates enter the cumulative
+     * pass vector used by downstream authority.
      */
     if (outcome.passed) {
       priorPasses.push(outcome.gate);
@@ -113,6 +131,8 @@ export function runPipeline(
 
   /*
    * Calculate the diagnostic weighted composite.
+   *
+   * This remains informational until calibrated.
    */
   let weightSum = 0;
   let weighted = 0;
@@ -129,7 +149,10 @@ export function runPipeline(
       : 0;
 
   /*
-   * Every gate must pass.
+   * Informational status only.
+   *
+   * This is deliberately NOT used as the execution
+   * requirement because G2..G6 are quality gates.
    */
   const allGatesPassed =
     outcomes.length === PIPELINE.length &&
@@ -138,10 +161,7 @@ export function runPipeline(
     );
 
   /*
-   * G8 is the final authority.
-   *
-   * Do not infer authority from failedAt alone.
-   * Read the actual G8 result.
+   * G8 is the final execution authority.
    */
   const authorityOutcome =
     outcomes.find(
@@ -155,15 +175,29 @@ export function runPipeline(
   /*
    * Final trade readiness.
    *
-   * A trade is armed only when:
+   * Execution requires:
    *
-   *   1. All eight gates passed.
-   *   2. G8 granted authority.
-   *   3. No hard veto occurred.
-   *   4. Composite meets its configured threshold.
+   *   1. G8 grants authority.
+   *   2. No genuine hard safety veto exists.
+   *   3. Composite meets its diagnostic threshold.
+   *
+   * G2..G6 are intentionally NOT required to pass.
+   *
+   * Therefore:
+   *
+   *   G2 fail  -> trade can still arm
+   *   G3 fail  -> trade can still arm
+   *   G4 fail  -> trade can still arm
+   *   G5 fail  -> trade can still arm
+   *   G6 fail  -> trade can still arm
+   *
+   * But:
+   *
+   *   G1 fail  -> execution blocked
+   *   G7 fail  -> execution blocked
+   *   G8 fail  -> execution blocked
    */
   const tradeArmed =
-    allGatesPassed &&
     authorityPassed &&
     failedAt === null &&
     compositeScore >= COMPOSITE_THRESHOLD;
@@ -173,6 +207,10 @@ export function runPipeline(
 
     failedAt,
 
+    /*
+     * Preserve this as a complete-report diagnostic.
+     * It is intentionally NOT used to arm trading.
+     */
     allPassed:
       allGatesPassed,
 
@@ -186,4 +224,4 @@ export function runPipeline(
     twinSeq:
       inputs.twin.last?.twinSeq ?? -1,
   };
-}
+      }
