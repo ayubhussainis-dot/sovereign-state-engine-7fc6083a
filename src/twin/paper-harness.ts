@@ -1,19 +1,18 @@
 /**
- * Paper Trading Harness — glues the live Binance Futures feed
- * to the deterministic MDT spine.
+ * Paper Trading Harness
  *
- * A caller pushes ticks in via `ingest()`. The harness:
- *   1. Assigns a monotonic twin sequence via `InternalMarket.append`.
- *   2. Emits a `TwinSnapshot` and folds the tick into Welford variance.
- *   3. Profiles the PPG telemetry layer (pure).
- *   4. Runs the SOALL G1..G8 pipeline (pure).
- *   5. Journals TWIN_TICK, PPG_SNAPSHOT, GATE_REPORT and — when the
- *      pipeline passes — a synthetic ORDER_INTENT into the hash-chained
- *      audit ledger. Nothing is ever sent to a live exchange.
+ * Connects the live Binance Futures feed to the deterministic MDT spine.
  *
- * Contract: single mutable instance, but every step above is a pure
- * function of the ingested tick sequence, so replaying the same tape
- * against a fresh harness yields an identical audit chain.
+ * Flow:
+ *   Live Tick
+ *     -> Internal Market
+ *     -> Twin Snapshot
+ *     -> PPG
+ *     -> SOALL G1..G8
+ *     -> Fusion Direction
+ *     -> Paper Execution
+ *
+ * No live exchange orders are sent.
  */
 
 import { InternalMarket } from "./internal-market";
@@ -23,7 +22,11 @@ import { AuditLedger, type AuditEntry } from "@/lib/audit-ledger";
 import type { RiskContext, GateReport } from "@/soall/types";
 import type { LiveTick, TwinSnapshot } from "./types";
 import type { PPGSnapshot } from "@/ppg/types";
-import { PaperExecutionSimulator, type PaperStats, type Side } from "./paper-execution-simulator";
+import {
+  PaperExecutionSimulator,
+  type PaperStats,
+  type Side,
+} from "./paper-execution-simulator";
 import { checkpoint, type T9Checkpoint } from "@/tix/t9";
 
 export interface HarnessCycle {
@@ -43,9 +46,18 @@ export interface HarnessTickInput {
   bid?: number;
   ask?: number;
   side?: LiveTick["side"];
-  /** Directional intent from the fusion layer; drives paper entries. */
+
+  /**
+   * Explicit directional intent from the Fusion layer.
+   *
+   * Only "long" or "short" can open a position.
+   * "flat" means no directional trade.
+   */
   intent?: Side | "flat";
-  /** Diagnostic from the fusion layer: which term blocked a LOCKED verdict. */
+
+  /**
+   * Diagnostic from the Fusion layer.
+   */
   fusion?: {
     verdict: string;
     agreement: number;
@@ -61,10 +73,13 @@ export interface HarnessTickInput {
 
 export class PaperHarness {
   readonly symbol: string;
+
   private readonly market = new InternalMarket({ capacity: 4096 });
   private readonly welford = new Welford();
+
   readonly ledger = new AuditLedger(4096);
   readonly paper = new PaperExecutionSimulator();
+
   private risk: RiskContext = {
     drawdownFraction: 0,
     consecutiveLosses: 0,
@@ -89,17 +104,35 @@ export class PaperHarness {
       bid: input.bid,
       ask: input.ask,
     };
+
     const tick = this.market.append(live);
     const twin = this.market.snapshot();
+
     const tixT9: T9Checkpoint[] = [
-      checkpoint("MARKET", tick.twinSeq, { status: "PARSED" }),
-      checkpoint("DIGITAL_TWIN", tick.twinSeq, { status: "OBSERVED" }),
+      checkpoint("MARKET", tick.twinSeq, {
+        status: "PARSED",
+      }),
+      checkpoint("DIGITAL_TWIN", tick.twinSeq, {
+        status: "OBSERVED",
+      }),
     ];
+
     const ppg = profile({ twin }, this.welford);
-    tixT9.push(checkpoint("JACK_JOKER", tick.twinSeq, { status: "OBSERVED" }));
-    const report = runPipeline({ twin, ppg, risk: this.risk });
+
+    tixT9.push(
+      checkpoint("JACK_JOKER", tick.twinSeq, {
+        status: "OBSERVED",
+      }),
+    );
+
+    const report = runPipeline({
+      twin,
+      ppg,
+      risk: this.risk,
+    });
 
     const entries: AuditEntry[] = [];
+
     entries.push(
       this.ledger.append("TWIN_TICK", tick.ts, {
         twinSeq: tick.twinSeq,
@@ -108,6 +141,7 @@ export class PaperHarness {
         latencyMs: tick.latencyMs,
       }),
     );
+
     entries.push(
       this.ledger.append("PPG_SNAPSHOT", tick.ts, {
         twinSeq: ppg.twinSeq,
@@ -117,11 +151,22 @@ export class PaperHarness {
         velocity: ppg.velocity.value,
       }),
     );
-    entries.push(this.ledger.appendGateReport(tick.ts, report));
 
-    // 1) Mark-to-market first: an already-open position gets a chance to
-    //    close on THIS tick before a new one can be opened.
-    const markEv = this.paper.mark(tick.price, tick.ts);
+    entries.push(
+      this.ledger.appendGateReport(tick.ts, report),
+    );
+
+    /*
+     * 1. Mark the existing position first.
+     *
+     * An existing trade must be allowed to hit its
+     * stop or target before another trade can open.
+     */
+    const markEv = this.paper.mark(
+      tick.price,
+      tick.ts,
+    );
+
     if (markEv && markEv.kind === "CLOSE") {
       entries.push(
         this.ledger.append("TRADE_CLOSED", tick.ts, {
@@ -136,46 +181,91 @@ export class PaperHarness {
       );
     }
 
-    // 2) If gates passed, evaluate direction (automatically triggering on +15 / -15 flow if intent is flat) and open.
-    if (report.allPassed) {
-      const flowValue = input.fusion?.consensusBull ?? 0;
-      const derivedIntent: Side | "flat" =
-        input.intent && input.intent !== "flat"
-          ? input.intent
-          : flowValue >= 15 ? "long" : flowValue <= -15 ? "short" : "flat";
+    /*
+     * 2. Resolve Fusion direction.
+     *
+     * Direction is now accepted only from an explicit
+     * directional Fusion verdict or an explicit intent
+     * supplied by the Fusion layer.
+     *
+     * No direction is manufactured from consensusBull.
+     */
+    const fusionVerdict =
+      input.fusion?.verdict ?? "SILENT";
 
-      const dir: Side | null =
-        derivedIntent === "long" || derivedIntent === "short" ? derivedIntent : null;
+    const fusionDirection: Side | null =
+      fusionVerdict === "LOCKED-BULL"
+        ? "long"
+        : fusionVerdict === "LOCKED-BEAR"
+          ? "short"
+          : null;
 
+    const explicitIntent: Side | null =
+      input.intent === "long" || input.intent === "short"
+        ? input.intent
+        : null;
+
+    /*
+     * The explicit Fusion intent is preferred when present.
+     * Otherwise use the directional Fusion verdict.
+     */
+    const dir: Side | null =
+      explicitIntent ?? fusionDirection;
+
+    /*
+     * Prevent a contradictory explicit intent from
+     * overriding a directional Fusion verdict.
+     */
+    const directionAgrees =
+      fusionDirection === null ||
+      dir === fusionDirection;
+
+    /*
+     * 3. Paper entry.
+     *
+     * A position can open only when:
+     *   - every SOALL gate passes
+     *   - Fusion is directional
+     *   - direction is consistent with Fusion
+     */
+    if (
+      report.allPassed &&
+      dir !== null &&
+      directionAgrees
+    ) {
       entries.push(
         this.ledger.append("ORDER_INTENT", tick.ts, {
           twinSeq: tick.twinSeq,
           mode: "PAPER",
           price: tick.price,
-          intent: dir ?? "flat",
+          intent: dir,
+          fusionVerdict,
         }),
       );
-      if (dir) {
-        const fill = this.paper.open({
-          side: dir,
-          price: tick.price,
-          ts: tick.ts,
-          twinSeq: tick.twinSeq,
-        });
-        if (fill && fill.kind === "FILL") {
-          entries.push(
-            this.ledger.append("ORDER_FILLED", tick.ts, {
-              id: fill.position.id,
-              side: fill.position.side,
-              entry: fill.position.entry,
-              stop: fill.position.stop,
-              target: fill.position.target,
-              qty: fill.position.qty,
-            }),
-          );
-        }
+
+      const fill = this.paper.open({
+        side: dir,
+        price: tick.price,
+        ts: tick.ts,
+        twinSeq: tick.twinSeq,
+      });
+
+      if (fill && fill.kind === "FILL") {
+        entries.push(
+          this.ledger.append("ORDER_FILLED", tick.ts, {
+            id: fill.position.id,
+            side: fill.position.side,
+            entry: fill.position.entry,
+            stop: fill.position.stop,
+            target: fill.position.target,
+            qty: fill.position.qty,
+          }),
+        );
       }
-    } else if (report.failedAt === "G7_RISK" || report.failedAt === "G8_AUTHORITY") {
+    } else if (
+      report.failedAt === "G7_RISK" ||
+      report.failedAt === "G8_AUTHORITY"
+    ) {
       entries.push(
         this.ledger.append("AUTHORITY_VETO", tick.ts, {
           twinSeq: tick.twinSeq,
@@ -184,27 +274,29 @@ export class PaperHarness {
       );
     }
 
-    // 3) Nothing opened this cycle → journal exactly WHY.
+    /*
+     * 4. Journal why no position is open.
+     */
     if (!this.paper.stats().openPosition) {
-      const flowValue = input.fusion?.consensusBull ?? 0;
-      const derivedIntent: Side | "flat" =
-        input.intent && input.intent !== "flat"
-          ? input.intent
-          : flowValue >= 15 ? "long" : flowValue <= -15 ? "short" : "flat";
-      const dir =
-        derivedIntent === "long" || derivedIntent === "short" ? derivedIntent : null;
-
-      const weakest = report.outcomes.reduce((a, b) => (b.score < a.score ? b : a));
       let blockedBy: string;
       let detail: Record<string, unknown>;
+
       if (report.failedAt) {
         blockedBy = `HARD_VETO:${report.failedAt}`;
+
         detail = {
           reason:
-            report.outcomes.find((o) => o.gate === report.failedAt)?.reason ?? "",
+            report.outcomes.find(
+              (o) => o.gate === report.failedAt,
+            )?.reason ?? "",
         };
       } else if (!report.tradeArmed) {
+        const weakest = report.outcomes.reduce(
+          (a, b) => (b.score < a.score ? b : a),
+        );
+
         blockedBy = "COMPOSITE_BELOW_THRESHOLD";
+
         detail = {
           composite: report.compositeScore,
           threshold: report.compositeThreshold,
@@ -214,8 +306,9 @@ export class PaperHarness {
         };
       } else if (!dir) {
         blockedBy = `FUSION:${input.fusion?.blocker ?? "NO_DIRECTION"}`;
+
         detail = {
-          verdict: input.fusion?.verdict ?? "UNKNOWN",
+          verdict: fusionVerdict,
           agreement: input.fusion?.agreement,
           consensusBull: input.fusion?.consensusBull,
           consensusBear: input.fusion?.consensusBear,
@@ -224,10 +317,23 @@ export class PaperHarness {
           notConfidence: input.fusion?.notConfidence,
           tonConfidence: input.fusion?.tonConfidence,
         };
+      } else if (!directionAgrees) {
+        blockedBy = "FUSION:DIRECTION_CONFLICT";
+
+        detail = {
+          fusionVerdict,
+          fusionDirection,
+          explicitIntent,
+          resolvedDirection: dir,
+        };
       } else {
         blockedBy = "PAPER_EXECUTION_REJECTED";
-        detail = { intent: dir };
+
+        detail = {
+          intent: dir,
+        };
       }
+
       entries.push(
         this.ledger.append("EXEC_BLOCK", tick.ts, {
           twinSeq: tick.twinSeq,
@@ -237,41 +343,60 @@ export class PaperHarness {
       );
     }
 
-    const flowValForDir = input.fusion?.consensusBull ?? 0;
-    const resolvedDir =
-      input.intent && input.intent !== "flat"
-        ? input.intent
-        : flowValForDir >= 15 ? "long" : flowValForDir <= -15 ? "short" : "flat";
-
+    /*
+     * 5. T9 state checkpoints.
+     */
     const direction =
-      resolvedDir === "long"
+      dir === "long"
         ? "BULL"
-        : resolvedDir === "short"
+        : dir === "short"
           ? "BEAR"
           : "NEUTRAL";
 
     tixT9.push(
-      checkpoint("FUSION", tick.twinSeq, { direction, status: input.fusion?.verdict ?? "SILENT" }),
+      checkpoint("FUSION", tick.twinSeq, {
+        direction,
+        status: fusionVerdict,
+      }),
+
       checkpoint("SOALL", tick.twinSeq, {
         direction,
-        status: report.tradeArmed ? "ARMED" : report.failedAt ?? "STANDBY",
+        status: report.tradeArmed
+          ? "ARMED"
+          : report.failedAt ?? "STANDBY",
       }),
+
       checkpoint("RISK_AUTHORITY", tick.twinSeq, {
         direction,
-        status: report.failedAt === "G7_RISK" || report.failedAt === "G8_AUTHORITY" ? "VETO" : "OBSERVED",
+        status:
+          report.failedAt === "G7_RISK" ||
+          report.failedAt === "G8_AUTHORITY"
+            ? "VETO"
+            : "OBSERVED",
       }),
+
       checkpoint("PAPER_EXECUTION", tick.twinSeq, {
         direction,
-        status: this.paper.stats().openPosition ? "OPEN" : "FLAT",
+        status: this.paper.stats().openPosition
+          ? "OPEN"
+          : "FLAT",
       }),
     );
-    return { twin, ppg, report, entries, paper: this.paper.stats(), tixT9 };
+
+    return {
+      twin,
+      ppg,
+      report,
+      entries,
+      paper: this.paper.stats(),
+      tixT9,
+    };
   }
 
-    reset(): void {
+  reset(): void {
     this.market.reset();
     this.ledger.reset();
     this.paper.reset();
     this.welford.reset();
   }
-}
+                           }
