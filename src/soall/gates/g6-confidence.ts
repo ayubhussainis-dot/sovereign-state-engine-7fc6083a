@@ -8,9 +8,13 @@
  *   Deterministic · Pure · No side effects · Replay safe.
  *
  * G6 answers:
- *   "Is the calculated confidence high enough to permit execution?"
+ *   "Is the calculated confidence high enough?"
  *
  * It does NOT determine BUY or SELL direction.
+ *
+ * Authority model:
+ *   G6 is a QUALITY / CONFIDENCE gate.
+ *   A failed G6 does NOT veto execution by itself.
  *
  * NOTE:
  *   The existing confidence formula is preserved exactly.
@@ -61,11 +65,14 @@ export const g6Confidence: Gate = ({
     confidenceScore >= C_FLOOR;
 
   /*
-   * G6 now has execution authority.
+   * G6 is NOT a hard execution veto.
    *
-   * Confidence below the floor prevents deployment.
+   * A failed confidence check is recorded as
+   * a quality failure, while final execution
+   * authority remains with the safety gates
+   * and G8.
    */
-  const hardVeto = !passed;
+  const hardVeto = false;
 
   return {
     gate: "G6_CONFIDENCE",
@@ -96,6 +103,9 @@ export const g6Confidence: Gate = ({
 
       confidenceSufficient:
         passed,
+
+      executionVeto:
+        false,
     },
 
     reason: passed
@@ -106,7 +116,7 @@ export const g6Confidence: Gate = ({
           3
         )} < floor=${C_FLOOR.toFixed(
           2
-        )} · EXECUTION VETO`,
+        )} · QUALITY FAIL`,
 
     specified: true,
   };
