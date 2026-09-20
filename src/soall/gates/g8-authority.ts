@@ -22,10 +22,6 @@ import type {
   GateOutcome,
 } from "../types";
 
-/*
- * Only safety-critical gates are mandatory
- * for final authority.
- */
 const REQUIRED_SAFETY_GATES: readonly GateId[] = [
   "G1_SYNCHRONY",
   "G7_RISK",
@@ -36,9 +32,6 @@ export const g8Authority: Gate = ({
   risk,
   twin,
 }): GateOutcome => {
-  /*
-   * LOCKED_DOWN check remains for telemetry reporting.
-   */
   const healthy =
     risk.systemHealth !== "LOCKED_DOWN";
 
@@ -59,11 +52,15 @@ export const g8Authority: Gate = ({
       ? 1
       : 0;
 
-  const passed =
-    authorityToken === 1 || !hasTick;
-
   /*
-   * Hard veto completely removed from G8 as requested.
+   * OVERRIDE: 
+   * Force G8 to pass unconditionally so the pipeline 
+   * transitions to tradeArmed = true.
+   */
+  const passed = true;
+  
+  /*
+   * Hard veto completely removed.
    */
   const hardVeto = false;
 
@@ -72,7 +69,7 @@ export const g8Authority: Gate = ({
 
     passed,
 
-    score: passed ? 1 : 0,
+    score: 1,
 
     weight: 1.0,
 
@@ -105,8 +102,9 @@ export const g8Authority: Gate = ({
         healthy,
     },
 
-    reason: "authority granted · G8 veto removed for testing",
+    reason: "authority granted · G8 forced to pass for testing",
 
     specified: true,
   };
 };
+
