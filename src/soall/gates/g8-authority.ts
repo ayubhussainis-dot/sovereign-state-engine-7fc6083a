@@ -1,189 +1,115 @@
 /**
- * SOALL Pipeline — runs G1..G8 in strict order.
+ * G8 — AUTHORITY
  *
- * G1..G7 evaluate the execution conditions.
- * G8 is the final authority gate.
+ * Final execution authority.
  *
- * Every gate is evaluated so the complete report can be
- * recorded in the audit ledger.
+ * G8 grants execution only when:
+ *   - system health is not LOCKED_DOWN
+ *   - every mandatory upstream gate has passed
  *
  * Contract:
- *   Deterministic · Pure · Replay safe.
+ *   Deterministic · Pure · No side effects · Replay safe.
  */
-
-import { g1Synchrony } from "./gates/g1-synchrony";
-import { g2Structure } from "./gates/g2-structure";
-import { g3Confluence } from "./gates/g3-confluence";
-import { g4Pattern } from "./gates/g4-pattern";
-import { g5Examination } from "./gates/g5-examination";
-import { g6Confidence } from "./gates/g6-confidence";
-import { g7Risk } from "./gates/g7-risk";
-import { g8Authority } from "./gates/g8-authority";
 
 import type {
   Gate,
   GateId,
-  GateInputs,
   GateOutcome,
-  GateReport,
-  RiskContext,
-} from "./types";
-
-import type { PPGSnapshot } from "@/ppg/types";
-import type { TwinSnapshot } from "@/twin/types";
-
-const PIPELINE: readonly Gate[] = [
-  g1Synchrony,
-  g2Structure,
-  g3Confluence,
-  g4Pattern,
-  g5Examination,
-  g6Confidence,
-  g7Risk,
-  g8Authority,
-];
+} from "../types";
 
 /*
- * Composite score is currently diagnostic.
- *
- * We are not using the composite score as an additional
- * trading restriction until the system is calibrated.
+ * Every upstream gate must pass before
+ * G8 can grant authority.
  */
-const COMPOSITE_THRESHOLD = 0.0;
+const REQUIRED: readonly GateId[] = [
+  "G1_SYNCHRONY",
+  "G2_STRUCTURE",
+  "G3_CONFLUENCE",
+  "G4_PATTERN",
+  "G5_EXAMINATION",
+  "G6_CONFIDENCE",
+  "G7_RISK",
+];
 
-export interface PipelineInputs {
-  twin: TwinSnapshot;
-  ppg: PPGSnapshot;
-  risk: RiskContext;
-}
-
-export function runPipeline(
-  inputs: PipelineInputs,
-): GateReport {
-  const outcomes: GateOutcome[] = [];
+export const g8Authority: Gate = ({
+  priorPasses,
+  risk,
+}): GateOutcome => {
+  /*
+   * LOCKED_DOWN always blocks execution.
+   */
+  const healthy =
+    risk.systemHealth !== "LOCKED_DOWN";
 
   /*
-   * Stores the gates that have actually passed.
+   * priorPasses is an array of GateId values.
    *
-   * G8 receives this cumulative pass vector.
+   * Check membership with includes().
    */
-  const priorPasses: GateId[] = [];
+  const missingGates: GateId[] =
+    REQUIRED.filter(
+      (gateId) => !priorPasses.includes(gateId),
+    );
 
   /*
-   * First hard-veto failure.
-   */
-  let failedAt: GateId | null = null;
-
-  /*
-   * Run G1 through G8 in strict order.
+   * Authority exists only when:
    *
-   * We intentionally continue through G8 so that the final
-   * authority decision and complete gate report are available.
+   * 1. System is healthy.
+   * 2. Every mandatory gate has passed.
    */
-  for (const gate of PIPELINE) {
-    const gateInputs: GateInputs = {
-      twin: inputs.twin,
-      ppg: inputs.ppg,
-      risk: inputs.risk,
-      priorPasses: priorPasses.slice(),
-    };
-
-    const outcome = gate(gateInputs);
-
-    outcomes.push(outcome);
-
-    /*
-     * Record the first hard-veto failure.
-     */
-    if (
-      !outcome.passed &&
-      outcome.hardVeto &&
-      failedAt === null
-    ) {
-      failedAt = outcome.gate;
-    }
-
-    /*
-     * Only passed gates enter the cumulative pass vector.
-     */
-    if (outcome.passed) {
-      priorPasses.push(outcome.gate);
-    }
-  }
-
-  /*
-   * Calculate the diagnostic weighted composite.
-   */
-  let weightSum = 0;
-  let weighted = 0;
-
-  for (const outcome of outcomes) {
-    weightSum += outcome.weight;
-    weighted +=
-      outcome.weight * outcome.score;
-  }
-
-  const compositeScore =
-    weightSum > 0
-      ? weighted / weightSum
+  const authorityToken =
+    healthy &&
+    missingGates.length === 0
+      ? 1
       : 0;
 
-  /*
-   * Every gate must pass.
-   */
-  const allGatesPassed =
-    outcomes.length === PIPELINE.length &&
-    outcomes.every(
-      (outcome) => outcome.passed,
-    );
+  const passed =
+    authorityToken === 1;
 
   /*
-   * G8 is the final authority.
-   *
-   * Do not infer authority from failedAt alone.
-   * Read the actual G8 result.
+   * G8 is the final hard execution veto.
    */
-  const authorityOutcome =
-    outcomes.find(
-      (outcome) =>
-        outcome.gate === "G8_AUTHORITY",
-    );
-
-  const authorityPassed =
-    authorityOutcome?.passed === true;
-
-  /*
-   * Final trade readiness.
-   *
-   * A trade is armed only when:
-   *
-   *   1. All eight gates passed.
-   *   2. G8 granted authority.
-   *   3. No hard veto occurred.
-   *   4. Composite meets its configured threshold.
-   */
-  const tradeArmed =
-    allGatesPassed &&
-    authorityPassed &&
-    failedAt === null &&
-    compositeScore >= COMPOSITE_THRESHOLD;
+  const hardVeto =
+    !passed;
 
   return {
-    outcomes,
+    gate: "G8_AUTHORITY",
 
-    failedAt,
+    passed,
 
-    allPassed:
-      allGatesPassed,
+    score: passed ? 1 : 0,
 
-    compositeScore,
+    weight: 1.0,
 
-    tradeArmed,
+    hardVeto,
 
-    compositeThreshold:
-      COMPOSITE_THRESHOLD,
+    evidence: {
+      authorityToken,
 
-    twinSeq:
-      inputs.twin.last?.twinSeq ?? -1,
+      systemHealth:
+        risk.systemHealth,
+
+      requiredGates: [
+        ...REQUIRED,
+      ],
+
+      missingGates,
+
+      allMandatoryGatesPassed:
+        missingGates.length === 0,
+
+      systemHealthy:
+        healthy,
+    },
+
+    reason: passed
+      ? "authority granted · all mandatory gates passed"
+      : `authority denied · ${
+          missingGates.length > 0
+            ? `failed gates: ${missingGates.join(", ")}`
+            : "system locked down"
+        } · EXECUTION VETO`,
+
+    specified: true,
   };
-}
+};
