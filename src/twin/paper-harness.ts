@@ -8,6 +8,8 @@
  *     -> Internal Market
  *     -> Twin Snapshot
  *     -> PPG
+ *     -> Existing Position Mark
+ *     -> Risk State Update
  *     -> SOALL G1..G8
  *     -> Fusion Direction
  *     -> Paper Execution
@@ -109,6 +111,28 @@ export class PaperHarness {
     };
   }
 
+  private updateRiskFromClosedTrade(pnl: number): void {
+    if (!Number.isFinite(pnl)) {
+      return;
+    }
+
+    if (pnl < 0) {
+      this.risk = {
+        ...this.risk,
+        consecutiveLosses:
+          this.risk.consecutiveLosses + 1,
+      };
+      return;
+    }
+
+    if (pnl > 0) {
+      this.risk = {
+        ...this.risk,
+        consecutiveLosses: 0,
+      };
+    }
+  }
+
   ingest(input: HarnessTickInput): HarnessCycle {
     const live: LiveTick = {
       ts: input.ts,
@@ -145,12 +169,6 @@ export class PaperHarness {
       }),
     );
 
-    const report = runPipeline({
-      twin,
-      ppg,
-      risk: this.risk,
-    });
-
     const entries: AuditEntry[] = [];
 
     entries.push(
@@ -172,18 +190,12 @@ export class PaperHarness {
       }),
     );
 
-    entries.push(
-      this.ledger.appendGateReport(
-        tick.ts,
-        report,
-      ),
-    );
-
     /*
      * 1. Mark the existing position first.
      *
-     * An existing trade must be allowed to hit its
-     * stop or target before another trade can open.
+     * The current market tick is allowed to close
+     * an existing position before a new authority
+     * decision is made.
      */
     const markEv = this.paper.mark(
       tick.price,
@@ -194,6 +206,10 @@ export class PaperHarness {
       markEv &&
       markEv.kind === "CLOSE"
     ) {
+      this.updateRiskFromClosedTrade(
+        markEv.trade.pnl,
+      );
+
       entries.push(
         this.ledger.append(
           "TRADE_CLOSED",
@@ -206,19 +222,42 @@ export class PaperHarness {
             qty: markEv.trade.qty,
             pnl: markEv.trade.pnl,
             reason: markEv.trade.reason,
+            consecutiveLosses:
+              this.risk.consecutiveLosses,
           },
         ),
       );
     }
 
     /*
-     * 2. Resolve Fusion direction.
+     * 2. Run SOALL using the latest risk state.
+     *
+     * This is important:
+     * a newly realized loss is visible to G7
+     * before another position can be opened.
+     */
+    const report = runPipeline({
+      twin,
+      ppg,
+      risk: this.risk,
+    });
+
+    entries.push(
+      this.ledger.appendGateReport(
+        tick.ts,
+        report,
+      ),
+    );
+
+    /*
+     * 3. Resolve Fusion direction.
      *
      * Direction comes only from:
      *   - explicit directional intent, or
      *   - explicit LOCKED-BULL / LOCKED-BEAR verdict.
      *
-     * No direction is manufactured from consensusBull/Bear.
+     * No direction is manufactured from
+     * consensusBull / consensusBear.
      */
     const fusionVerdict =
       input.fusion?.verdict ?? "SILENT";
@@ -236,32 +275,28 @@ export class PaperHarness {
         ? input.intent
         : null;
 
-    /*
-     * Explicit Fusion intent is preferred.
-     * Otherwise use the directional Fusion verdict.
-     */
     const dir: Side | null =
       explicitIntent ??
       fusionDirection;
 
     /*
-     * Prevent contradictory intent from overriding
-     * a directional Fusion verdict.
+     * Prevent contradictory explicit intent
+     * from overriding a directional Fusion verdict.
      */
     const directionAgrees =
       fusionDirection === null ||
       dir === fusionDirection;
 
     /*
-     * 3. Determine final execution eligibility.
+     * 4. Final execution eligibility.
      *
-     * IMPORTANT:
+     * report.allPassed is intentionally NOT used.
      *
-     * report.allPassed is NOT used here.
+     * G2..G6 are quality gates.
      *
-     * G2..G6 are quality gates and may fail.
+     * G1/G7 are safety gates.
      *
-     * report.tradeArmed is the SOALL/G8 authority result.
+     * G8 is final authority.
      */
     const executionAuthorized =
       report.tradeArmed &&
@@ -283,6 +318,8 @@ export class PaperHarness {
               report.tradeArmed,
             allGatesPassed:
               report.allPassed,
+            consecutiveLosses:
+              this.risk.consecutiveLosses,
           },
         ),
       );
@@ -315,14 +352,8 @@ export class PaperHarness {
       }
     } else {
       /*
-       * 4. Record the actual reason execution
+       * 5. Record the actual reason execution
        * was not attempted.
-       *
-       * Priority:
-       *   1. Genuine SOALL hard veto
-       *   2. SOALL authority not armed
-       *   3. No Fusion direction
-       *   4. Direction conflict
        */
       let blockedBy: string;
 
@@ -344,6 +375,8 @@ export class PaperHarness {
           hardVeto: true,
           tradeArmed:
             report.tradeArmed,
+          consecutiveLosses:
+            this.risk.consecutiveLosses,
         };
       } else if (!report.tradeArmed) {
         const authorityOutcome =
@@ -366,6 +399,8 @@ export class PaperHarness {
             report.compositeScore,
           threshold:
             report.compositeThreshold,
+          consecutiveLosses:
+            this.risk.consecutiveLosses,
         };
       } else if (!dir) {
         blockedBy =
@@ -428,7 +463,7 @@ export class PaperHarness {
     }
 
     /*
-     * 5. T9 state checkpoints.
+     * 6. T9 state checkpoints.
      */
     const direction =
       dir === "long"
@@ -502,6 +537,13 @@ export class PaperHarness {
     this.market.reset();
     this.ledger.reset();
     this.paper.reset();
+
     this.welford.reset();
+
+    this.risk = {
+      drawdownFraction: 0,
+      consecutiveLosses: 0,
+      systemHealth: "NORMAL",
+    };
   }
-        }
+  }
