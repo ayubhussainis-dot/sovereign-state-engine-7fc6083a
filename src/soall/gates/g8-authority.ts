@@ -27,10 +27,6 @@ import type {
 /*
  * Every gate listed here must pass before authority
  * can be granted.
- *
- * G2 was previously missing from this vector.
- * It is now mandatory because market structure is an
- * explicit part of the execution conditions.
  */
 const REQUIRED: readonly GateId[] = [
   "G1_SYNCHRONY",
@@ -47,28 +43,27 @@ export const g8Authority: Gate = ({
   risk,
 }): GateOutcome => {
   /*
-   * System-level emergency lock.
-   *
-   * LOCKED_DOWN always means NO execution.
+   * LOCKED_DOWN always means no execution.
    */
   const healthy =
     risk.systemHealth !== "LOCKED_DOWN";
 
   /*
-   * Identify every mandatory gate that has not passed.
+   * priorPasses is an array of GateId values.
    *
-   * This is the actual cumulative pass vector.
+   * A mandatory gate is missing when its GateId
+   * is not present in that array.
    */
   const missingGates: GateId[] =
     REQUIRED.filter(
-      (gateId) => priorPasses?.[gateId] !== true
+      (gateId) => !priorPasses.includes(gateId),
     );
 
   /*
-   * Authority token exists only when:
+   * Authority exists only when:
    *
-   * 1. System is healthy.
-   * 2. Every mandatory gate passed.
+   * 1. The system is healthy.
+   * 2. Every mandatory gate has passed.
    */
   const authorityToken =
     healthy &&
@@ -84,8 +79,6 @@ export const g8Authority: Gate = ({
 
   /*
    * G8 is the final hard stop.
-   *
-   * If anything mandatory failed, execution is vetoed.
    */
   const hardVeto =
     !passed;
