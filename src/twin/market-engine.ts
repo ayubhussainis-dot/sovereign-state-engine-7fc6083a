@@ -105,13 +105,18 @@ export class MarketEngine {
     if (!f.lastPrice || f.lastTradeAt === this.lastIngestedAt) return;
     this.lastIngestedAt = f.lastTradeAt;
 
+    const now = Date.now();
+    const eventTs = f.lastEventTs || f.lastTradeAt;
+    const latencyMs = Math.max(0, now - eventTs);
+
     const fusion = fuseFrame(f);
     this.mc01.update(this.joall.translate(f));
     const cycle = this.harness.ingest({
       price: f.lastPrice,
       volume: f.lastQty,
-      ts: f.lastEventTs || f.lastTradeAt,
-      receivedAt: Date.now(),
+      ts: eventTs,
+      receivedAt: now,
+      latencyMs: latencyMs,
       bid: f.bid > 0 ? f.bid : undefined,
       ask: f.ask > 0 ? f.ask : undefined,
       side: f.lastSide ?? undefined,
