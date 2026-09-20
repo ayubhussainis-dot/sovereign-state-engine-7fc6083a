@@ -1,9 +1,14 @@
 /**
  * SOALL Pipeline — runs G1..G8 in strict order.
- * First failure halts. Every outcome is returned; the caller journals
- * the report to the audit ledger.
  *
- * Contract: Production-ready deterministic logic · Pure · Replay safe.
+ * G1..G7 evaluate the execution conditions.
+ * G8 is the final authority gate.
+ *
+ * Every gate is evaluated so the complete report can be
+ * recorded in the audit ledger.
+ *
+ * Contract:
+ *   Deterministic · Pure · Replay safe.
  */
 
 import { g1Synchrony } from "./gates/g1-synchrony";
@@ -14,6 +19,7 @@ import { g5Examination } from "./gates/g5-examination";
 import { g6Confidence } from "./gates/g6-confidence";
 import { g7Risk } from "./gates/g7-risk";
 import { g8Authority } from "./gates/g8-authority";
+
 import type {
   Gate,
   GateId,
@@ -22,6 +28,7 @@ import type {
   GateReport,
   RiskContext,
 } from "./types";
+
 import type { PPGSnapshot } from "@/ppg/types";
 import type { TwinSnapshot } from "@/twin/types";
 
@@ -36,20 +43,43 @@ const PIPELINE: readonly Gate[] = [
   g8Authority,
 ];
 
+/*
+ * Composite score is currently diagnostic.
+ *
+ * We are not using the composite score as an additional
+ * trading restriction until the system is calibrated.
+ */
+const COMPOSITE_THRESHOLD = 0.0;
+
 export interface PipelineInputs {
   twin: TwinSnapshot;
   ppg: PPGSnapshot;
   risk: RiskContext;
 }
 
-// Zeroed out so telemetry flow never triggers a threshold block
-const COMPOSITE_THRESHOLD = 0.0;
-
-export function runPipeline(inputs: PipelineInputs): GateReport {
+export function runPipeline(
+  inputs: PipelineInputs,
+): GateReport {
   const outcomes: GateOutcome[] = [];
+
+  /*
+   * Stores the gates that have actually passed.
+   *
+   * G8 receives this cumulative pass vector.
+   */
   const priorPasses: GateId[] = [];
+
+  /*
+   * First hard-veto failure.
+   */
   let failedAt: GateId | null = null;
 
+  /*
+   * Run G1 through G8 in strict order.
+   *
+   * We intentionally continue through G8 so that the final
+   * authority decision and complete gate report are available.
+   */
   for (const gate of PIPELINE) {
     const gateInputs: GateInputs = {
       twin: inputs.twin,
@@ -57,33 +87,103 @@ export function runPipeline(inputs: PipelineInputs): GateReport {
       risk: inputs.risk,
       priorPasses: priorPasses.slice(),
     };
+
     const outcome = gate(gateInputs);
+
     outcomes.push(outcome);
-    if (!outcome.passed && outcome.hardVeto && failedAt === null) {
+
+    /*
+     * Record the first hard-veto failure.
+     */
+    if (
+      !outcome.passed &&
+      outcome.hardVeto &&
+      failedAt === null
+    ) {
       failedAt = outcome.gate;
     }
-    if (outcome.passed) priorPasses.push(outcome.gate);
+
+    /*
+     * Only passed gates enter the cumulative pass vector.
+     */
+    if (outcome.passed) {
+      priorPasses.push(outcome.gate);
+    }
   }
 
+  /*
+   * Calculate the diagnostic weighted composite.
+   */
   let weightSum = 0;
   let weighted = 0;
-  for (const o of outcomes) {
-    weightSum += o.weight;
-    weighted += o.weight * o.score;
+
+  for (const outcome of outcomes) {
+    weightSum += outcome.weight;
+    weighted +=
+      outcome.weight * outcome.score;
   }
-  const compositeScore = weightSum > 0 ? weighted / weightSum : 0;
-  
-  const allGatesPassed = outcomes.every(o => o.passed);
-  // Unhindered flow: arms as long as there is no hard veto failure
-  const tradeArmed = failedAt === null;
+
+  const compositeScore =
+    weightSum > 0
+      ? weighted / weightSum
+      : 0;
+
+  /*
+   * Every gate must pass.
+   */
+  const allGatesPassed =
+    outcomes.length === PIPELINE.length &&
+    outcomes.every(
+      (outcome) => outcome.passed,
+    );
+
+  /*
+   * G8 is the final authority.
+   *
+   * Do not infer authority from failedAt alone.
+   * Read the actual G8 result.
+   */
+  const authorityOutcome =
+    outcomes.find(
+      (outcome) =>
+        outcome.gate === "G8_AUTHORITY",
+    );
+
+  const authorityPassed =
+    authorityOutcome?.passed === true;
+
+  /*
+   * Final trade readiness.
+   *
+   * A trade is armed only when:
+   *
+   *   1. All eight gates passed.
+   *   2. G8 granted authority.
+   *   3. No hard veto occurred.
+   *   4. Composite meets its configured threshold.
+   */
+  const tradeArmed =
+    allGatesPassed &&
+    authorityPassed &&
+    failedAt === null &&
+    compositeScore >= COMPOSITE_THRESHOLD;
 
   return {
     outcomes,
+
     failedAt,
-    allPassed: allGatesPassed,
+
+    allPassed:
+      allGatesPassed,
+
     compositeScore,
+
     tradeArmed,
-    compositeThreshold: COMPOSITE_THRESHOLD,
-    twinSeq: inputs.twin.last?.twinSeq ?? -1,
+
+    compositeThreshold:
+      COMPOSITE_THRESHOLD,
+
+    twinSeq:
+      inputs.twin.last?.twinSeq ?? -1,
   };
 }
