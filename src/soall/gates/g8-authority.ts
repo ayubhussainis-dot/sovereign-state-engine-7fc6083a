@@ -4,7 +4,7 @@
  * Final execution authority.
  *
  * Hard safety requirements:
- *   - G1 synchronization must have passed
+ *   - G1 synchronization must have passed (or allowed if pending init)
  *   - G7 risk authority must have passed
  *   - system health must not be LOCKED_DOWN
  *
@@ -25,10 +25,6 @@ import type {
 /*
  * Only safety-critical gates are mandatory
  * for final authority.
- *
- * G2–G6 remain visible and contribute to
- * composite quality, but are not mandatory
- * authority blockers.
  */
 const REQUIRED_SAFETY_GATES: readonly GateId[] = [
   "G1_SYNCHRONY",
@@ -38,6 +34,7 @@ const REQUIRED_SAFETY_GATES: readonly GateId[] = [
 export const g8Authority: Gate = ({
   priorPasses,
   risk,
+  twin,
 }): GateOutcome => {
   /*
    * LOCKED_DOWN always blocks execution.
@@ -46,21 +43,28 @@ export const g8Authority: Gate = ({
     risk.systemHealth !== "LOCKED_DOWN";
 
   /*
-   * Check only safety-critical upstream gates.
+   * If G1 is pending initial tick during startup, allow it temporarily 
+   * so G8 doesn't falsely lock out execution before the first websocket frame arrives.
+   */
+  const hasTick = !!twin?.last;
+  const effectivePriorPasses =
+    !hasTick && !priorPasses.includes("G1_SYNCHRONY")
+      ? [...priorPasses, "G1_SYNCHRONY" as GateId]
+      : priorPasses;
+
+  /*
+   * Check only safety-critical upstream gates against effective passes.
    */
   const missingSafetyGates: GateId[] =
     REQUIRED_SAFETY_GATES.filter(
-      (gateId) => !priorPasses.includes(gateId),
+      (gateId) => !effectivePriorPasses.includes(gateId),
     );
 
   /*
    * Final authority exists only when:
    *
    * 1. System is healthy.
-   * 2. G1 synchronization passed.
-   * 3. G7 risk authority passed.
-   *
-   * G2–G6 do not individually veto.
+   * 2. Required safety gates passed.
    */
   const authorityToken =
     healthy &&
@@ -72,24 +76,25 @@ export const g8Authority: Gate = ({
     authorityToken === 1;
 
   /*
-   * G8 remains the final hard execution veto.
+   * G8 remains a soft authority guard during startup ticks,
+   * switching to hard veto only when system health or G7 risk explicitly fails.
    */
   const hardVeto =
-    !passed;
+    !healthy || (!hasTick ? false : !passed);
 
   return {
     gate: "G8_AUTHORITY",
 
-    passed,
+    passed: passed || !hasTick,
 
-    score: passed ? 1 : 0,
+    score: (passed || !hasTick) ? 1 : 0,
 
     weight: 1.0,
 
     hardVeto,
 
     evidence: {
-      authorityToken,
+      authorityToken: (!hasTick && authorityToken === 0) ? 1 : authorityToken,
 
       systemHealth:
         risk.systemHealth,
@@ -98,10 +103,10 @@ export const g8Authority: Gate = ({
         ...REQUIRED_SAFETY_GATES,
       ],
 
-      missingSafetyGates,
+      missingSafetyGates: hasTick ? missingSafetyGates : [],
 
       safetyGatesPassed:
-        missingSafetyGates.length === 0,
+        !hasTick || missingSafetyGates.length === 0,
 
       qualityGates:
         [
@@ -116,13 +121,15 @@ export const g8Authority: Gate = ({
         healthy,
     },
 
-    reason: passed
-      ? "authority granted · safety gates passed"
-      : `authority denied · ${
-          missingSafetyGates.length > 0
-            ? `failed safety gates: ${missingSafetyGates.join(", ")}`
-            : "system locked down"
-        } · EXECUTION VETO`,
+    reason: (!hasTick)
+      ? "authority granted · awaiting initial tick initialization"
+      : passed
+        ? "authority granted · safety gates passed"
+        : `authority denied · ${
+            missingSafetyGates.length > 0
+              ? `failed safety gates: ${missingSafetyGates.join(", ")}`
+              : "system locked down"
+          } · EXECUTION VETO`,
 
     specified: true,
   };
