@@ -34,9 +34,9 @@ export interface PaperStats {
 }
 
 export interface PaperBrokerConfig {
-  notionalUsdt: number;   // capital per trade
-  stopFrac: number;       // 0.0015 = 15 bps (tight cut on stalls)
-  targetFrac: number;     // 0.0065 = 65 bps (wide runner target for 60-70+ expansions)
+  notionalUsdt: number;
+  stopFrac: number;
+  targetFrac: number;
 }
 
 export interface OpenSignal {
@@ -44,8 +44,11 @@ export interface OpenSignal {
   price: number;
   ts: number;
   twinSeq: number;
-  waveType?: string;   // "EXPANDED", "ANTINODE_PEAK", "NODAL_ZERO", "COMPRESSED"
-  composite?: number;  // Optional quality threshold
+
+  // Retained for compatibility with existing callers.
+  // Entry authority belongs to SOALL/Fusion/Risk Authority.
+  waveType?: string;
+  composite?: number;
 }
 
 export type BrokerEvent =
@@ -54,8 +57,10 @@ export type BrokerEvent =
 
 export class PaperBroker {
   private cfg: PaperBrokerConfig;
+
   private position: PaperPosition | null = null;
   private trades: PaperTrade[] = [];
+
   private nextId = 1;
   private cumPnL = 0;
   private wins = 0;
@@ -63,35 +68,45 @@ export class PaperBroker {
 
   constructor(cfg?: Partial<PaperBrokerConfig>) {
     this.cfg = {
-      notionalUsdt: 100,
-      stopFrac: 0.0015,  // Tight 15 bps stop to kill zero-line pullbacks quickly
-      targetFrac: 0.0065, // Wide 65 bps runner target to capture structural 60-70+ expansions
+      notionalUsdt: 10,
+      stopFrac: 0.0020,
+      targetFrac: 0.0040,
       ...cfg,
     };
   }
 
-  /** Attempt to open a position. Restricts entry ONLY to high-win EXPANDED or ANTINODE_PEAK waves. */
   open(signal: OpenSignal): BrokerEvent | null {
     if (this.position) return null;
-    if (!Number.isFinite(signal.price) || signal.price <= 0) return null;
 
-    // Strict High-Win Filter: Only permit trade entry on EXPANDED or ANTINODE_PEAK wave states
-    const wave = (signal.waveType || "").toUpperCase();
-    if (wave !== "EXPANDED" && wave !== "ANTINODE_PEAK") {
+    if (!Number.isFinite(signal.price) || signal.price <= 0) {
+      return null;
+    }
+
+    if (!Number.isFinite(signal.ts) || signal.ts <= 0) {
+      return null;
+    }
+
+    if (!Number.isFinite(signal.twinSeq) || signal.twinSeq < 0) {
       return null;
     }
 
     const qty = this.cfg.notionalUsdt / signal.price;
+
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return null;
+    }
+
     const stop =
       signal.side === "long"
         ? signal.price * (1 - this.cfg.stopFrac)
         : signal.price * (1 + this.cfg.stopFrac);
+
     const target =
       signal.side === "long"
         ? signal.price * (1 + this.cfg.targetFrac)
         : signal.price * (1 - this.cfg.targetFrac);
-    
-    const pos: PaperPosition = {
+
+    const position: PaperPosition = {
       id: this.nextId++,
       side: signal.side,
       entry: signal.price,
@@ -101,62 +116,100 @@ export class PaperBroker {
       openedAt: signal.ts,
       openedTwinSeq: signal.twinSeq,
     };
-    
-    this.position = pos;
-    return { kind: "FILL", position: pos };
+
+    this.position = position;
+
+    return {
+      kind: "FILL",
+      position,
+    };
   }
 
-  /** Mark the open position against the latest tick; may close. */
   mark(price: number, ts: number): BrokerEvent | null {
-    const pos = this.position;
-    if (!pos) return null;
-    if (!Number.isFinite(price) || price <= 0) return null;
+    const position = this.position;
+
+    if (!position) {
+      return null;
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return null;
+    }
+
+    if (!Number.isFinite(ts) || ts <= 0) {
+      return null;
+    }
 
     let exit: number | null = null;
     let reason: PaperTrade["reason"] | null = null;
-    if (pos.side === "long") {
-      if (price <= pos.stop) { exit = pos.stop; reason = "STOP"; }
-      else if (price >= pos.target) { exit = pos.target; reason = "TARGET"; }
+
+    if (position.side === "long") {
+      if (price <= position.stop) {
+        exit = position.stop;
+        reason = "STOP";
+      } else if (price >= position.target) {
+        exit = position.target;
+        reason = "TARGET";
+      }
     } else {
-      if (price >= pos.stop) { exit = pos.stop; reason = "STOP"; }
-      else if (price <= pos.target) { exit = pos.target; reason = "TARGET"; }
+      if (price >= position.stop) {
+        exit = position.stop;
+        reason = "STOP";
+      } else if (price <= position.target) {
+        exit = position.target;
+        reason = "TARGET";
+      }
     }
-    if (exit == null || reason == null) return null;
+
+    if (exit === null || reason === null) {
+      return null;
+    }
 
     const gross =
-      pos.side === "long"
-        ? (exit - pos.entry) * pos.qty
-        : (pos.entry - exit) * pos.qty;
-    
+      position.side === "long"
+        ? (exit - position.entry) * position.qty
+        : (position.entry - exit) * position.qty;
+
     const trade: PaperTrade = {
-      id: pos.id,
-      side: pos.side,
-      entry: pos.entry,
+      id: position.id,
+      side: position.side,
+      entry: position.entry,
       exit,
-      qty: pos.qty,
+      qty: position.qty,
       pnl: gross,
       reason,
-      openedAt: pos.openedAt,
+      openedAt: position.openedAt,
       closedAt: ts,
     };
 
     this.trades.push(trade);
     this.cumPnL += gross;
-    if (gross >= 0) this.wins++; else this.losses++;
+
+    if (gross > 0) {
+      this.wins++;
+    } else if (gross < 0) {
+      this.losses++;
+    }
+
     this.position = null;
-    return { kind: "CLOSE", trade };
+
+    return {
+      kind: "CLOSE",
+      trade,
+    };
   }
 
   stats(): PaperStats {
-    const t = this.trades.length;
+    const trades = this.trades.length;
+
     return {
-      trades: t,
+      trades,
       wins: this.wins,
       losses: this.losses,
-      winRate: t === 0 ? 0 : this.wins / t,
+      winRate: trades === 0 ? 0 : this.wins / trades,
       cumPnL: this.cumPnL,
       openPosition: this.position,
-      lastTrade: t === 0 ? null : this.trades[t - 1],
+      lastTrade: trades === 0 ? null : this.trades[trades - 1],
     };
   }
 
@@ -172,4 +225,4 @@ export class PaperBroker {
     this.losses = 0;
     this.nextId = 1;
   }
-}
+           }
