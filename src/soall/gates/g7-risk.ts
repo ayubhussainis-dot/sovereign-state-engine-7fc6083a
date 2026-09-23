@@ -1,98 +1,310 @@
 /**
- * G7 — RISK (ACTIVE RISK & ASYMMETRIC LOSS FLOOR AUTHORITY GATE)
+ * G7 — RISK (ACTIVE RISK & SYMMETRIC ±30 BPS AUTHORITY GATE)
  *
  * Purpose:
  *   Evaluate drawdown, consecutive losses, risk ladder state,
- *   and active asymmetric position parameters before allowing execution.
+ *   and active position boundaries before allowing execution.
+ *
+ * TEST STRATEGY:
+ *   - Momentum starts at +1 BPS
+ *   - Winning boundary: +30 BPS
+ *   - Loss boundary: -30 BPS
+ *   - Same PnL model for long and short positions
  *
  * Contract:
  *   Deterministic · Pure · No side effects · Replay safe.
  *
  * Behavior:
- *   - Risk parameters clear AND active position stays above -10 bps -> PASS
- *   - Drawdown failure OR trade hits the -10 bps asymmetric loss floor -> FAIL (VETO)
- *   - G7 retains direct execution authority.
+ *   - Institutional risk parameters clear -> PASS
+ *   - Active position remains above -30 BPS -> PASS
+ *   - Active position reaches -30 BPS -> FAIL / HARD VETO
+ *   - G7 retains direct execution risk authority.
  */
 
 import { evaluateG2 } from "@/engine/sovereign/g2-checkpoint";
 import { evaluateAuthority } from "@/engine/sovereign/risk-authority";
 import type { Gate, GateOutcome } from "../types";
 
-const MAX_LOSS_BPS = -10.0;     // Your strict asymmetric loss limit from fill price
-const TARGET_WIN_BPS = 24.0;    // Your sovereign macro profit target
+// =====================================================================
+// STRATEGIC PARAMETERS
+// =====================================================================
+
+/**
+ * Favorable movement begins at +1 BPS.
+ *
+ * This is an activation/telemetry boundary, not the exit target.
+ */
+const MOMENTUM_START_BPS = 1.0;
+
+/**
+ * Winning boundary.
+ */
+const TARGET_WIN_BPS = 30.0;
+
+/**
+ * Maximum permitted loss from actual fill.
+ *
+ * This is the HARD RISK VETO boundary.
+ */
+const MAX_LOSS_BPS = -30.0;
+
+// =====================================================================
+// G7 RISK
+// =====================================================================
 
 export const g7Risk: Gate = ({
   twin,
   risk,
-  priorPasses
+  priorPasses,
 }): GateOutcome => {
-  /*
-   * Evaluate the existing risk ladder.
-   */
+
+  // -------------------------------------------------------------------
+  // EXISTING RISK LADDER
+  // -------------------------------------------------------------------
+
   const ladder = evaluateG2(
     risk.drawdownFraction
   );
 
-  /*
-   * Evaluate the existing risk authority.
-   */
-  const authority = evaluateAuthority({
-    drawdownFraction:
-      risk.drawdownFraction,
+  // -------------------------------------------------------------------
+  // EXISTING RISK AUTHORITY
+  // -------------------------------------------------------------------
 
-    consecutiveLosses:
-      risk.consecutiveLosses,
-  });
+  const authority =
+    evaluateAuthority({
+      drawdownFraction:
+        risk.drawdownFraction,
 
-  // Base institutional metrics verification
-  let canTrade = ladder.canTrade && authority.canTrade;
-  let activeStrategyVeto = false;
-  let strategicReason = "";
-  let currentPnLBps = 0;
+      consecutiveLosses:
+        risk.consecutiveLosses,
+    });
 
-  // --- SOVEREIGN ACTIVE POSITION RISK CONTROLLER ---
-  if (risk && (risk.positionState === "OPEN" || risk.positionState === "MANAGING" || risk.positionState === "HOLDING_STRETCH")) {
-    const lastPrice = twin?.last ? parseFloat(twin.last.close || twin.last.price || risk.currentPrice) : risk.currentPrice;
-    const multiplier = risk.positionSide === "long" ? 1 : -1;
-    currentPnLBps = ((lastPrice - risk.entryPrice) / risk.entryPrice) * multiplier * 10000;
+  // -------------------------------------------------------------------
+  // BASE INSTITUTIONAL RISK
+  // -------------------------------------------------------------------
 
-    // CRITICAL PROTECTION: Hard Asymmetric Stop Floor breached (-10 bps from real entry)
-    if (currentPnLBps <= MAX_LOSS_BPS) {
+  let canTrade =
+    ladder.canTrade &&
+    authority.canTrade;
+
+  let activeStrategyVeto =
+    false;
+
+  let strategicReason =
+    "";
+
+  let currentPnLBps =
+    0;
+
+  let momentumStarted =
+    false;
+
+  let targetReached =
+    false;
+
+  let lossBoundaryReached =
+    false;
+
+  // -------------------------------------------------------------------
+  // LIVE POSITION RISK CONTROLLER
+  // -------------------------------------------------------------------
+
+  const positionIsLive =
+    risk &&
+    (
+      risk.positionState === "OPEN" ||
+      risk.positionState === "MANAGING" ||
+      risk.positionState === "HOLDING_STRETCH"
+    );
+
+  if (positionIsLive) {
+
+    const lastPrice =
+      twin?.last
+        ? parseFloat(
+            twin.last.close ||
+            twin.last.price ||
+            risk.currentPrice
+          )
+        : risk.currentPrice;
+
+    const multiplier =
+      risk.positionSide === "long"
+        ? 1
+        : -1;
+
+    // ---------------------------------------------------------------
+    // UNIFIED LONG / SHORT PNL
+    // ---------------------------------------------------------------
+
+    if (
+      risk.entryPrice &&
+      Number.isFinite(risk.entryPrice) &&
+      risk.entryPrice !== 0
+    ) {
+      currentPnLBps =
+        (
+          ((lastPrice - risk.entryPrice) /
+            risk.entryPrice) *
+          multiplier *
+          10000
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // +1 BPS MOMENTUM START
+    // ---------------------------------------------------------------
+
+    if (
+      currentPnLBps >=
+      MOMENTUM_START_BPS
+    ) {
+      momentumStarted = true;
+    }
+
+    // ---------------------------------------------------------------
+    // +30 BPS WIN BOUNDARY
+    // ---------------------------------------------------------------
+
+    if (
+      currentPnLBps >=
+      TARGET_WIN_BPS
+    ) {
+      targetReached = true;
+
+      /*
+       * G7 does not close the trade itself.
+       *
+       * The execution layer / G8 handles settlement.
+       *
+       * Therefore reaching +30 BPS is recorded here,
+       * but it is NOT a risk veto.
+       */
+      strategicReason =
+        `TARGET_30BPS_REACHED ` +
+        `(${currentPnLBps.toFixed(2)}bps)`;
+    }
+
+    // ---------------------------------------------------------------
+    // -30 BPS HARD LOSS BOUNDARY
+    // ---------------------------------------------------------------
+
+    if (
+      currentPnLBps <=
+      MAX_LOSS_BPS
+    ) {
       canTrade = false;
-      activeStrategyVeto = true;
-      strategicReason = `HARD_ASYMMETRIC_LOSS_FLOOR_BREACHED (${currentPnLBps.toFixed(2)}bps)`;
-    } 
-    // INTERCEPTOR: Enforce the Freedom Zone Hold Window
-    else {
-      // Check if your core pattern and confidence quality gates (G4 or G6) failed, indicating an inversion signal
-      const dynamicInversionSignaled = priorPasses && (!priorPasses.includes("G4_PATTERN") || !priorPasses.includes("G6_CONFIDENCE"));
 
-      if (dynamicInversionSignaled) {
-        // If we fluctuate anywhere in the profit or dead loss buffer zone, forcefully suppress the panic cutoff
-        if (currentPnLBps > MAX_LOSS_BPS && currentPnLBps < TARGET_WIN_BPS) {
-          strategicReason = `FREEDOM_ZONE_ACTIVE (${currentPnLBps.toFixed(2)}bps) · Suppressing early inversion noise.`;
-        }
+      activeStrategyVeto =
+        true;
+
+      lossBoundaryReached =
+        true;
+
+      strategicReason =
+        `MAX_LOSS_30BPS_BREACHED ` +
+        `(${currentPnLBps.toFixed(2)}bps)`;
+    }
+
+    // ---------------------------------------------------------------
+    // FREEDOM-ZONE / INVERSION TELEMETRY
+    //
+    // This does NOT override the -30 BPS hard boundary.
+    // ---------------------------------------------------------------
+
+    if (
+      !lossBoundaryReached
+    ) {
+
+      const dynamicInversionSignaled =
+        priorPasses &&
+        (
+          !priorPasses.includes(
+            "G4_PATTERN"
+          ) ||
+          !priorPasses.includes(
+            "G6_CONFIDENCE"
+          )
+        );
+
+      if (
+        dynamicInversionSignaled &&
+        currentPnLBps > MAX_LOSS_BPS &&
+        currentPnLBps < TARGET_WIN_BPS
+      ) {
+
+        strategicReason =
+          `FREEDOM_ZONE_ACTIVE ` +
+          `(${currentPnLBps.toFixed(2)}bps) · ` +
+          `Inversion noise suppressed.`;
       }
     }
   }
 
-  const score = Math.max(
-    0,
-    1 - risk.drawdownFraction * 10
-  );
+  // -------------------------------------------------------------------
+  // BASE RISK SCORE
+  // -------------------------------------------------------------------
 
-  // G7 passes ONLY if baseline capital restrictions pass AND active trading stops stay unbreached
-  const passed = canTrade;
-  const hardVeto = !canTrade;
+  const score =
+    Math.max(
+      0,
+      1 -
+        risk.drawdownFraction * 10
+    );
+
+  // -------------------------------------------------------------------
+  // FINAL G7 DECISION
+  // -------------------------------------------------------------------
+
+  const passed =
+    canTrade;
+
+  /*
+   * G7 is the direct risk authority.
+   *
+   * If the -30 BPS boundary is breached,
+   * hardVeto becomes TRUE.
+   */
+  const hardVeto =
+    !canTrade;
+
+  // -------------------------------------------------------------------
+  // FINAL REASON
+  // -------------------------------------------------------------------
 
   let finalReasonString = "";
+
   if (activeStrategyVeto) {
-    finalReasonString = `risk denied · ${strategicReason} · ASYMMETRIC SHUTDOWN VETO`;
+
+    finalReasonString =
+      `risk denied · ` +
+      `${strategicReason} · ` +
+      `SYMMETRIC -30 BPS SHUTDOWN VETO`;
+
   } else if (canTrade) {
-    finalReasonString = `risk permitted · ${ladder.status} · ${authority.state} · ${strategicReason || "Parameters Clear"} · score=${score.toFixed(3)}`;
+
+    finalReasonString =
+      `risk permitted · ` +
+      `${ladder.status} · ` +
+      `${authority.state} · ` +
+      `${
+        strategicReason ||
+        "Parameters Clear"
+      } · ` +
+      `score=${score.toFixed(3)}`;
+
   } else {
-    finalReasonString = `risk denied · ${ladder.reason} · ${authority.reason} · GLOBAL CAPITAL VETO`;
+
+    finalReasonString =
+      `risk denied · ` +
+      `${ladder.reason} · ` +
+      `${authority.reason} · ` +
+      `GLOBAL CAPITAL VETO`;
   }
+
+  // ===================================================================
+  // FINAL GATE OUTCOME
+  // ===================================================================
 
   return {
     gate: "G7_RISK",
@@ -106,6 +318,11 @@ export const g7Risk: Gate = ({
     hardVeto,
 
     evidence: {
+
+      // ---------------------------------------------------------------
+      // INSTITUTIONAL RISK
+      // ---------------------------------------------------------------
+
       drawdownFraction:
         risk.drawdownFraction,
 
@@ -130,15 +347,55 @@ export const g7Risk: Gate = ({
       authorityPermitted:
         authority.canTrade,
 
-      // Extended strategic telemetry for the audit ledger
+      // ---------------------------------------------------------------
+      // UNIFIED BPS MODEL
+      // ---------------------------------------------------------------
+
+      currentPnLBps:
+        parseFloat(
+          currentPnLBps.toFixed(2)
+        ),
+
+      momentumStartBps:
+        MOMENTUM_START_BPS,
+
+      maxLossBpsFloor:
+        MAX_LOSS_BPS,
+
+      targetWinBpsCeiling:
+        TARGET_WIN_BPS,
+
+      // ---------------------------------------------------------------
+      // STRATEGIC TELEMETRY
+      // ---------------------------------------------------------------
+
+      momentumStarted,
+
+      targetReached,
+
+      lossBoundaryReached,
+
       activeStrategyVeto,
-      currentPnLBps: parseFloat(currentPnLBps.toFixed(2)),
-      maxLossBpsFloor: MAX_LOSS_BPS,
-      targetWinBpsCeiling: TARGET_WIN_BPS,
-      positionState: risk?.positionState ?? "FLAT"
+
+      positionState:
+        risk?.positionState ??
+        "FLAT",
+
+      positionSide:
+        risk?.positionSide ??
+        null,
+
+      entryPrice:
+        risk?.entryPrice ??
+        null,
+
+      currentPrice:
+        risk?.currentPrice ??
+        null,
     },
 
-    reason: finalReasonString,
+    reason:
+      finalReasonString,
 
     specified: true,
   };
