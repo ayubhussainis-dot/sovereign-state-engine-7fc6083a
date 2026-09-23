@@ -4,40 +4,86 @@
  * Decision Criterion:
  *   Pass if C >= C_FLOOR or optimized by sovereign trend confirmations.
  *
+ * TEST STRATEGY:
+ *   - Momentum/confidence activation begins at +1 BPS
+ *   - Winning boundary: +30 BPS
+ *   - Loss boundary: -30 BPS
+ *   - Same PnL model for long and short positions
+ *
  * Contract:
  *   Deterministic · Pure · No side effects · Replay safe.
  *
  * Behavior:
- *   - Calculated confidence score meets baseline OR sovereign velocity is active -> PASS
- *   - Volatility shock or flow decay under standard baseline -> FAIL
+ *   - Calculated confidence score meets baseline -> PASS
+ *   - Favorable position movement reaches +1 BPS -> sovereign
+ *     confidence confirmation
+ *   - +30 BPS -> strategic target boundary
+ *   - -30 BPS -> strategic loss boundary
  *   - G6 remains a quality gate, not a hard execution veto.
  */
 
 import type { Gate, GateOutcome } from "../types";
 
+// =====================================================================
+// CONFIDENCE PARAMETERS
+// =====================================================================
+
 const K1 = 2.0;
+
 const K2 = 1.0;
+
 const C_FLOOR = 0.60;
-const TIPPING_POINT_BPS = 12.0; // The sovereign momentum point of no return
+
+/**
+ * Sovereign confidence activation starts at +1 BPS.
+ *
+ * Previous value:
+ *   12 BPS
+ *
+ * New test configuration:
+ *   1 BPS
+ */
+const MOMENTUM_START_BPS = 1.0;
+
+/**
+ * Strategic winning boundary.
+ */
+const TARGET_WIN_BPS = 30.0;
+
+/**
+ * Strategic maximum-loss boundary.
+ */
+const MAX_LOSS_BPS = -30.0;
+
+// =====================================================================
+// NORMALIZATION
+// =====================================================================
 
 const clamp01 = (n: number): number =>
   n < 0 ? 0 : n > 1 ? 1 : n;
+
+// =====================================================================
+// G6 CONFIDENCE
+// =====================================================================
 
 export const g6Confidence: Gate = ({
   ppg,
   twin,
   risk,
 }): GateOutcome => {
+
   const volatility =
     ppg?.volatility?.value ?? 0;
 
   const ofi =
     ppg?.ofi?.value ?? 0;
 
-  /*
-   * Preserve the existing confidence mathematics exactly:
-   * C = 1 - (K1 × volatility + K2 × |OFI| × 0.1)
-   */
+  // -------------------------------------------------------------------
+  // EXISTING CONFIDENCE MATHEMATICS
+  //
+  // C = 1 - (K1 × volatility + K2 × |OFI| × 0.1)
+  // -------------------------------------------------------------------
+
   const rawConfidence =
     1.0 -
     (
@@ -45,79 +91,250 @@ export const g6Confidence: Gate = ({
       K2 * Math.abs(ofi) * 0.1
     );
 
-  let confidenceScore = clamp01(rawConfidence);
+  let confidenceScore =
+    clamp01(rawConfidence);
 
-  // --- SOVEREIGN CONFIDENCE RATCHET MODIFIER ---
-  // If the position is actively open and has cleanly cleared your 12 bps point of no return,
-  // we recognize that the move has converted into a confirmed trend and maximize confidence.
-  let sovereignConfidenceSecured = false;
+  // -------------------------------------------------------------------
+  // SOVEREIGN CONFIDENCE MONITOR
+  // -------------------------------------------------------------------
+
+  let sovereignConfidenceSecured =
+    false;
+
   let currentPnLBps = 0;
 
-  if (risk && (risk.positionState === "OPEN" || risk.positionState === "MANAGING" || risk.positionState === "HOLDING_STRETCH")) {
-    const lastPrice = twin?.last ? parseFloat(twin.last.close || twin.last.price || risk.currentPrice) : risk.currentPrice;
-    const multiplier = risk.positionSide === "long" ? 1 : -1;
-    currentPnLBps = ((lastPrice - risk.entryPrice) / risk.entryPrice) * multiplier * 10000;
+  let targetReached = false;
 
-    if (currentPnLBps >= TIPPING_POINT_BPS) {
-      sovereignConfidenceSecured = true;
-      confidenceScore = 1.0; // Force maximum structural confidence rating
+  let lossBoundaryReached = false;
+
+  const positionIsLive =
+    risk &&
+    (
+      risk.positionState === "OPEN" ||
+      risk.positionState === "MANAGING" ||
+      risk.positionState === "HOLDING_STRETCH"
+    );
+
+  if (positionIsLive) {
+
+    const lastPrice =
+      twin?.last
+        ? parseFloat(
+            twin.last.close ||
+            twin.last.price ||
+            risk.currentPrice
+          )
+        : risk.currentPrice;
+
+    const multiplier =
+      risk.positionSide === "long"
+        ? 1
+        : -1;
+
+    // ---------------------------------------------------------------
+    // Unified long/short PnL calculation
+    // ---------------------------------------------------------------
+
+    if (
+      risk.entryPrice &&
+      Number.isFinite(risk.entryPrice) &&
+      risk.entryPrice !== 0
+    ) {
+      currentPnLBps =
+        (
+          ((lastPrice - risk.entryPrice) /
+            risk.entryPrice) *
+          multiplier *
+          10000
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // +1 BPS CONFIDENCE ACTIVATION
+    // ---------------------------------------------------------------
+
+    if (
+      currentPnLBps >=
+      MOMENTUM_START_BPS
+    ) {
+      sovereignConfidenceSecured =
+        true;
+
+      confidenceScore = 1.0;
+    }
+
+    // ---------------------------------------------------------------
+    // +30 BPS WIN BOUNDARY
+    // ---------------------------------------------------------------
+
+    if (
+      currentPnLBps >=
+      TARGET_WIN_BPS
+    ) {
+      targetReached = true;
+    }
+
+    // ---------------------------------------------------------------
+    // -30 BPS LOSS BOUNDARY
+    // ---------------------------------------------------------------
+
+    if (
+      currentPnLBps <=
+      MAX_LOSS_BPS
+    ) {
+      lossBoundaryReached = true;
     }
   }
 
-  /*
-   * Actual confidence decision.
-   */
+  // -------------------------------------------------------------------
+  // BASE CONFIDENCE DECISION
+  // -------------------------------------------------------------------
+
   const basePassed =
     Number.isFinite(confidenceScore) &&
     confidenceScore >= C_FLOOR;
 
-  // Gate passes if baseline confidence is sufficient OR if sovereign wave is locked
-  const passed = basePassed || sovereignConfidenceSecured;
+  // Gate passes if baseline confidence is sufficient OR
+  // sovereign confidence has activated at +1 BPS.
+  const passed =
+    basePassed ||
+    sovereignConfidenceSecured;
 
   /*
    * G6 is NOT a hard execution veto.
    *
    * A failed confidence check is recorded as
-   * a quality failure, while final execution
-   * authority remains with the safety gates
-   * and G8.
+   * a quality failure. Final execution authority
+   * remains with the safety/execution layers.
    */
   const hardVeto = false;
 
+  // ===================================================================
+  // QUANTITATIVE LABEL
+  // ===================================================================
+
   let quantitativeLabel = "";
-  if (sovereignConfidenceSecured) {
-    quantitativeLabel = `SOVEREIGN_CONFIDENCE_SECURED · PnL: ${currentPnLBps.toFixed(2)}bps >= ${TIPPING_POINT_BPS}bps · Score maxed.`;
+
+  if (lossBoundaryReached) {
+
+    quantitativeLabel =
+      `LOSS_BOUNDARY_REACHED · ` +
+      `PnL: ${currentPnLBps.toFixed(2)}bps <= ` +
+      `${MAX_LOSS_BPS}bps · ` +
+      `Execution boundary: -30 BPS`;
+
+  } else if (targetReached) {
+
+    quantitativeLabel =
+      `TARGET_BOUNDARY_REACHED · ` +
+      `PnL: ${currentPnLBps.toFixed(2)}bps >= ` +
+      `+${TARGET_WIN_BPS}bps · ` +
+      `Execution boundary: +30 BPS`;
+
+  } else if (sovereignConfidenceSecured) {
+
+    quantitativeLabel =
+      `SOVEREIGN_CONFIDENCE_STARTED · ` +
+      `PnL: ${currentPnLBps.toFixed(2)}bps >= ` +
+      `${MOMENTUM_START_BPS}bps · ` +
+      `Confidence activated from +1 BPS`;
+
   } else {
-    quantitativeLabel = `C=${confidenceScore.toFixed(3)} · floor=${C_FLOOR.toFixed(2)}`;
+
+    quantitativeLabel =
+      `C=${confidenceScore.toFixed(3)} · ` +
+      `floor=${C_FLOOR.toFixed(2)}`;
   }
+
+  // ===================================================================
+  // FINAL GATE OUTCOME
+  // ===================================================================
 
   return {
     gate: "G6_CONFIDENCE",
 
     passed,
 
-    score: confidenceScore,
+    score:
+      confidenceScore,
 
     weight: 1.0,
 
     hardVeto,
 
     evidence: {
+
+      // ---------------------------------------------------------------
+      // CONFIDENCE
+      // ---------------------------------------------------------------
+
       confidenceScore,
-      cFloor: C_FLOOR,
+
+      cFloor:
+        C_FLOOR,
+
       volatility,
+
       ofi,
-      k1: K1,
-      k2: K2,
-      confidenceFormula: "1 - (K1 × volatility + K2 × |OFI| × 0.1)",
-      confidenceSufficient: passed,
-      executionVeto: false,
-      
-      // Extended sovereign metrics for the audit ledger trail
+
+      k1:
+        K1,
+
+      k2:
+        K2,
+
+      confidenceFormula:
+        "1 - (K1 × volatility + K2 × |OFI| × 0.1)",
+
+      confidenceSufficient:
+        passed,
+
+      executionVeto:
+        false,
+
+      // ---------------------------------------------------------------
+      // UNIFIED BPS MODEL
+      // ---------------------------------------------------------------
+
+      currentPnLBps:
+        parseFloat(
+          currentPnLBps.toFixed(2)
+        ),
+
+      momentumStartBps:
+        MOMENTUM_START_BPS,
+
+      targetWinBps:
+        TARGET_WIN_BPS,
+
+      maximumLossBps:
+        MAX_LOSS_BPS,
+
+      // ---------------------------------------------------------------
+      // STRATEGIC STATE
+      // ---------------------------------------------------------------
+
       sovereignConfidenceSecured,
-      currentPnLBps: parseFloat(currentPnLBps.toFixed(2)),
-      tippingPointThresholdBps: TIPPING_POINT_BPS,
-      positionState: risk?.positionState ?? "FLAT"
+
+      targetReached,
+
+      lossBoundaryReached,
+
+      positionState:
+        risk?.positionState ??
+        "FLAT",
+
+      positionSide:
+        risk?.positionSide ??
+        null,
+
+      entryPrice:
+        risk?.entryPrice ??
+        null,
+
+      currentPrice:
+        risk?.currentPrice ??
+        null,
     },
 
     reason: passed
