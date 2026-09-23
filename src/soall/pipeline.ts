@@ -9,16 +9,16 @@
  * --------------------------------------------------------------------
  *
  * Entry:
- *   +0.001 favorable movement from signal
+ *   +0.0001 (1 BPS) favorable movement from signal
  *
  * Actual Fill:
  *   The price at which entry occurs becomes the trade's zero reference.
  *
  * Win:
- *   +0.300 from actual fill
+ *   +0.0030 (30 BPS) from actual fill
  *
  * Loss:
- *   -0.300 from actual fill
+ *   -0.0030 (-30 BPS) from actual fill
  *
  * Direction:
  *   Long  → rising price is favorable
@@ -35,8 +35,8 @@
  * 2. Require the configured entry condition.
  * 3. Treat the actual fill as the zero reference.
  * 4. Protect the position continuously.
- * 5. +0.300 settles as WIN.
- * 6. -0.300 settles as LOSS.
+ * 5. +0.0030 settles as WIN.
+ * 6. -0.0030 settles as LOSS.
  * 7. Never widen the loss boundary.
  * 8. Never chase a missed entry.
  * 9. Respect G8 authority exits.
@@ -135,23 +135,23 @@ export interface TradeCycleRecord {
 // =====================================================================
 
 /**
- * Entry threshold.
+ * Entry threshold (1 BPS).
  *
  * Same threshold for LONG and SHORT.
  *
  * The movement must be FAVORABLE to the selected side.
  */
-const ENTRY_BPS = 0.001;
+const ENTRY_BPS = 0.0001;
 
 /**
- * Winning boundary from ACTUAL FILL.
+ * Winning boundary from ACTUAL FILL (30 BPS).
  */
-const TARGET_WIN_BPS = 0.300;
+const TARGET_WIN_BPS = 0.0030;
 
 /**
- * Losing boundary from ACTUAL FILL.
+ * Losing boundary from ACTUAL FILL (-30 BPS).
  */
-const MAX_LOSS_BPS = -0.300;
+const MAX_LOSS_BPS = -0.0030;
 
 // =====================================================================
 // ENGINE
@@ -237,11 +237,11 @@ class EmbeddedTradeStateMachine {
    * Example:
    *
    * LONG:
-   *   +0.001 = favorable
+   *   +0.0001 = favorable
    *
    * SHORT:
    *   underlying price falls
-   *   normalized result = +0.001
+   *   normalized result = +0.0001
    */
   private calculateFavorableMovement(
     currentPrice: number,
@@ -281,8 +281,8 @@ class EmbeddedTradeStateMachine {
    *
    * Application decimal scale:
    *
-   *   +0.300 = WIN
-   *   -0.300 = LOSS
+   *   +0.0030 = WIN
+   *   -0.0030 = LOSS
    */
   private calculatePnLBps(
     currentPrice: number,
@@ -570,7 +570,7 @@ class EmbeddedTradeStateMachine {
     }
 
     // ================================================================
-    // PHASE 3 — 0.001 FAVORABLE ENTRY
+    // PHASE 3 — 1 BPS FAVORABLE ENTRY
     // ================================================================
 
     if (
@@ -726,7 +726,7 @@ class EmbeddedTradeStateMachine {
       }
 
       // ==============================================================
-      // +0.300 = WIN
+      // +30 BPS = WIN
       // ==============================================================
 
       if (
@@ -738,12 +738,12 @@ class EmbeddedTradeStateMachine {
           timestamp,
           verdict,
           agreement,
-          `TARGET_0.300_SECURED (${currentPnLBps.toFixed(4)})`,
+          `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
         );
       }
 
       // ==============================================================
-      // -0.300 = LOSS
+      // -30 BPS = LOSS
       // ==============================================================
 
       if (
@@ -755,7 +755,7 @@ class EmbeddedTradeStateMachine {
           timestamp,
           verdict,
           agreement,
-          `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
+          `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
         );
       }
 
@@ -775,7 +775,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `TARGET_0.300_SECURED (${currentPnLBps.toFixed(4)})`,
+            `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
           );
         }
 
@@ -788,7 +788,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
+            `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
           );
         }
       }
@@ -805,7 +805,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `TARGET_0.300_SECURED (${currentPnLBps.toFixed(4)})`,
+            `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
           );
         }
 
@@ -818,7 +818,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
+            `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
           );
         }
       }
@@ -1184,4 +1184,4 @@ export function runPipeline(
     currentPositionState:
       finalEngineContext.state,
   };
-    }
+}
