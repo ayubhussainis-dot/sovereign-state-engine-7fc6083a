@@ -1,6 +1,6 @@
 import { createHmac } from "crypto";
 
-const FAPI_BASE = "https://testnet.binancefuture.com";
+const FAPI_BASE = "https://demo-fapi.binance.com";
 
 export interface FuturesTelemetrySnapshot {
   symbol: string;
@@ -98,7 +98,7 @@ export async function executeDirectOrder(side: "BUY" | "SELL", quantity: number,
   const apiKey = process.env["BINANCE_TESTNET_API_KEY"];
   const apiSecret = process.env["BINANCE_TESTNET_API_SECRET"];
   if (!apiKey || !apiSecret) {
-    throw new Error("Binance testnet credentials not configured for direct order");
+    throw new Error("Binance credentials not configured for direct order");
   }
 
   const ts = Date.now();
