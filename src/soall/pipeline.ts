@@ -1,60 +1,49 @@
 /**
- * SOALL Pipeline — Runs G1..G8 in strict sequence with Embedded Sovereign Engine.
+ * SOALL Pipeline
+ * --------------------------------------------------------------------
+ * G1 → G2 → G3 → G4 → G5 → G6 → G7 → G8
  *
- * TEST STRATEGY CONFIGURATION
- * ----------------------------
- * Entry Mechanism:
- *   0.001 entry threshold
+ * Embedded Sovereign Trade Engine
  *
- * Risk Management:
- *   Strict symmetric -0.300 maximum loss from fill
+ * NUMERIC CONTRACT
+ * --------------------------------------------------------------------
  *
- * Target Execution:
- *   +0.300 target from fill
+ * Entry:
+ *   +0.001 favorable movement from signal
  *
- * Authority:
- *   G8 may explicitly signal a strategic exit.
+ * Actual Fill:
+ *   The price at which entry occurs becomes the trade's zero reference.
  *
- * Important:
-  TRADING OBJECTIVE
-
-Your primary objective is capital preservation and execution quality.
-
-Seek a profitable outcome on every valid trade, but NEVER force a trade
-merely to remain active.
-
-Before entering:
-1. Verify that every required gate is satisfied.
-2. Verify that the entry condition is valid.
-3. Reject ambiguous, conflicting, stale, or abnormal conditions.
-4. If the setup is not sufficiently clear, remain FLAT.
-
-After entering:
-1. Treat the actual fill as the zero reference.
-2. Protect the position continuously.
-3. Take the WIN immediately at +0.300.
-4. Take the LOSS immediately at -0.300.
-5. Never widen the loss boundary to avoid recording a loss.
-6. Never manufacture a trade to recover a previous loss.
-7. Never override a hard risk veto.
-8. Never chase price after a missed entry.
-
-CORE PRINCIPLE:
-
-Do not trade because you need to win.
-Trade only when the system has a valid opportunity to win.
-
-When uncertainty increases, reduce activity rather than increasing risk.
-When the trade reaches its defined boundary, execute the boundary
-deterministically without hesitation.
- * Numeric contract:
+ * Win:
+ *   +0.300 from actual fill
  *
- *   ENTRY  = +0.001
- *   WIN    = +0.300 from actual fill
- *   LOSS   = -0.300 from actual fill
+ * Loss:
+ *   -0.300 from actual fill
+ *
+ * Direction:
+ *   Long  → rising price is favorable
+ *   Short → falling price is favorable
+ *
+ * IMPORTANT:
+ *   These values use the application's DECIMAL SCALE.
+ *   They are NOT converted using *10000.
+ *
+ * EXECUTION PRINCIPLES
+ * --------------------------------------------------------------------
+ *
+ * 1. Never force a trade.
+ * 2. Require the configured entry condition.
+ * 3. Treat the actual fill as the zero reference.
+ * 4. Protect the position continuously.
+ * 5. +0.300 settles as WIN.
+ * 6. -0.300 settles as LOSS.
+ * 7. Never widen the loss boundary.
+ * 8. Never chase a missed entry.
+ * 9. Respect G8 authority exits.
+ * 10. Respect hard gate vetoes.
  *
  * Contract:
- *   Deterministic · Pure · Replay Safe · Complete · Self-Contained
+ *   Deterministic · Replay Safe · Self-Contained
  */
 
 import { g1Synchrony } from "./gates/g1-synchrony";
@@ -79,7 +68,7 @@ import type { PPGSnapshot } from "@/ppg/types";
 import type { TwinSnapshot } from "@/twin/types";
 
 // =====================================================================
-// ENGINE SYSTEM TYPE ARCHITECTURE
+// TRADE SYSTEM TYPES
 // =====================================================================
 
 export type TradeState =
@@ -88,91 +77,109 @@ export type TradeState =
   | "TRAPPING"
   | "OPEN"
   | "MANAGING"
-  | "HOLDING_STRETCH"
-  | "CLOSING"
-  | "SETTLED";
+  | "CLOSING";
 
-export type Side = "long" | "short";
+export type Side =
+  | "long"
+  | "short";
 
 export interface PositionContext {
   state: TradeState;
+
   side: Side | null;
+
   signalPrice: number;
+
   entryPrice: number;
+
   size: number;
+
   targetPrice: number;
+
   stopPrice: number;
+
   openedAt: number;
+
   fusionSnapshot: {
     verdict: string;
     agreement: number;
   };
+
   ALI3N: string;
 }
 
 export interface TradeCycleRecord {
   id: string;
+
   side: Side;
+
   signalPrice: number;
+
   entryPrice: number;
+
   exitPrice: number;
+
   pnlBps: number;
+
   reason: string;
+
   openedAt: number;
+
   closedAt: number;
+
   ALI3N: string;
 }
 
 // =====================================================================
-// STRATEGIC TEST PARAMETERS
+// AUTHORITATIVE NUMERIC CONTRACT
 // =====================================================================
 
 /**
- * AUTHORITATIVE ENTRY VALUE.
+ * Entry threshold.
  *
- * Same numeric threshold for LONG and SHORT.
+ * Same threshold for LONG and SHORT.
  *
- * The actual market price at which this threshold is reached
- * becomes the actual fill / zero reference for the trade.
+ * The movement must be FAVORABLE to the selected side.
  */
 const ENTRY_BPS = 0.001;
 
 /**
- * AUTHORITATIVE WIN VALUE.
- *
- * Measured FROM ACTUAL FILL.
- *
- * +0.300 = WIN
+ * Winning boundary from ACTUAL FILL.
  */
 const TARGET_WIN_BPS = 0.300;
 
 /**
- * AUTHORITATIVE LOSS VALUE.
- *
- * Measured FROM ACTUAL FILL.
- *
- * -0.300 = LOSS
+ * Losing boundary from ACTUAL FILL.
  */
 const MAX_LOSS_BPS = -0.300;
 
 // =====================================================================
-// SOVEREIGN ALPHA ENGINE CLASS
+// ENGINE
 // =====================================================================
 
 class EmbeddedTradeStateMachine {
   private context: PositionContext = {
     state: "FLAT",
+
     side: null,
+
     signalPrice: 0,
+
     entryPrice: 0,
+
     size: 1.0,
+
     targetPrice: 0,
+
     stopPrice: 0,
+
     openedAt: 0,
+
     fusionSnapshot: {
       verdict: "SILENT",
       agreement: 0,
     },
+
     ALI3N: "ACTIVE",
   };
 
@@ -180,14 +187,17 @@ class EmbeddedTradeStateMachine {
 
   private lastVerdictChange = 0;
 
-  private debounceWindowMs = 2000;
+  private readonly debounceWindowMs =
+    2000;
 
   // -------------------------------------------------------------------
-  // PUBLIC STATE ACCESS
+  // STATE ACCESS
   // -------------------------------------------------------------------
 
   getState(): PositionContext {
-    return { ...this.context };
+    return {
+      ...this.context,
+    };
   }
 
   getLedger(): readonly TradeCycleRecord[] {
@@ -195,26 +205,84 @@ class EmbeddedTradeStateMachine {
   }
 
   // -------------------------------------------------------------------
-  // PRICE / PNL CALCULATORS
+  // DIRECTION
   // -------------------------------------------------------------------
 
   /**
-   * Returns PnL in the SAME DECIMAL SCALE used by the application.
+   * Returns the directional multiplier used throughout the engine.
    *
-   * IMPORTANT:
+   * LONG:
+   *   price ↑ = favorable
    *
-   * There is NO *10000 conversion here.
+   * SHORT:
+   *   price ↓ = favorable
+   */
+  private getDirectionMultiplier(
+    side: Side,
+  ): number {
+    return side === "long"
+      ? 1
+      : -1;
+  }
+
+  // -------------------------------------------------------------------
+  // DECIMAL MOVEMENT
+  // -------------------------------------------------------------------
+
+  /**
+   * Calculates favorable movement from signal.
+   *
+   * Result is in the application's decimal scale.
    *
    * Example:
    *
+   * LONG:
+   *   +0.001 = favorable
+   *
+   * SHORT:
+   *   underlying price falls
+   *   normalized result = +0.001
+   */
+  private calculateFavorableMovement(
+    currentPrice: number,
+    signalPrice: number,
+    side: Side,
+  ): number {
+    if (
+      !signalPrice ||
+      !Number.isFinite(signalPrice)
+    ) {
+      return 0;
+    }
+
+    const multiplier =
+      this.getDirectionMultiplier(
+        side,
+      );
+
+    return (
+      (
+        (
+          currentPrice -
+          signalPrice
+        ) /
+        signalPrice
+      ) *
+      multiplier
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // PNL
+  // -------------------------------------------------------------------
+
+  /**
+   * Calculates PnL FROM ACTUAL FILL.
+   *
+   * Application decimal scale:
+   *
    *   +0.300 = WIN
    *   -0.300 = LOSS
-   *
-   * Long:
-   *   price rises = positive PnL
-   *
-   * Short:
-   *   price falls = positive PnL
    */
   private calculatePnLBps(
     currentPrice: number,
@@ -229,30 +297,34 @@ class EmbeddedTradeStateMachine {
     }
 
     const multiplier =
-      side === "long"
-        ? 1
-        : -1;
+      this.getDirectionMultiplier(
+        side,
+      );
 
     return (
       (
-        (currentPrice - entryPrice) /
+        (
+          currentPrice -
+          entryPrice
+        ) /
         entryPrice
       ) *
       multiplier
     );
   }
 
-  /**
-   * Calculates the +0.300 target FROM ACTUAL FILL.
-   */
+  // -------------------------------------------------------------------
+  // TARGET PRICE
+  // -------------------------------------------------------------------
+
   private calculateTargetPrice(
     entryPrice: number,
     side: Side,
   ): number {
     const multiplier =
-      side === "long"
-        ? 1
-        : -1;
+      this.getDirectionMultiplier(
+        side,
+      );
 
     return (
       entryPrice *
@@ -264,17 +336,18 @@ class EmbeddedTradeStateMachine {
     );
   }
 
-  /**
-   * Calculates the -0.300 stop FROM ACTUAL FILL.
-   */
+  // -------------------------------------------------------------------
+  // STOP PRICE
+  // -------------------------------------------------------------------
+
   private calculateStopPrice(
     entryPrice: number,
     side: Side,
   ): number {
     const multiplier =
-      side === "long"
-        ? 1
-        : -1;
+      this.getDirectionMultiplier(
+        side,
+      );
 
     return (
       entryPrice *
@@ -287,7 +360,41 @@ class EmbeddedTradeStateMachine {
   }
 
   // -------------------------------------------------------------------
-  // POSITION SETTLEMENT
+  // RESET
+  // -------------------------------------------------------------------
+
+  private resetToFlat(
+    verdict: string,
+    agreement: number,
+  ): void {
+    this.context = {
+      state: "FLAT",
+
+      side: null,
+
+      signalPrice: 0,
+
+      entryPrice: 0,
+
+      size: 1.0,
+
+      targetPrice: 0,
+
+      stopPrice: 0,
+
+      openedAt: 0,
+
+      fusionSnapshot: {
+        verdict,
+        agreement,
+      },
+
+      ALI3N: "ACTIVE",
+    };
+  }
+
+  // -------------------------------------------------------------------
+  // SETTLEMENT
   // -------------------------------------------------------------------
 
   private settlePosition(
@@ -306,7 +413,7 @@ class EmbeddedTradeStateMachine {
     const entry =
       this.context.entryPrice;
 
-    const currentPnLBps =
+    const pnl =
       this.calculatePnLBps(
         currentPrice,
         entry,
@@ -332,7 +439,7 @@ class EmbeddedTradeStateMachine {
         currentPrice,
 
       pnlBps:
-        currentPnLBps,
+        pnl,
 
       reason,
 
@@ -346,41 +453,14 @@ class EmbeddedTradeStateMachine {
         "SETTLED",
     };
 
-    this.ledger.push(record);
+    this.ledger.push(
+      record,
+    );
 
-    this.context = {
-      state:
-        "FLAT",
-
-      side:
-        null,
-
-      signalPrice:
-        0,
-
-      entryPrice:
-        0,
-
-      size:
-        1.0,
-
-      targetPrice:
-        0,
-
-      stopPrice:
-        0,
-
-      openedAt:
-        0,
-
-      fusionSnapshot: {
-        verdict,
-        agreement,
-      },
-
-      ALI3N:
-        "ACTIVE",
-    };
+    this.resetToFlat(
+      verdict,
+      agreement,
+    );
 
     return {
       action:
@@ -391,7 +471,7 @@ class EmbeddedTradeStateMachine {
   }
 
   // -------------------------------------------------------------------
-  // TICK EVALUATION
+  // TICK ENGINE
   // -------------------------------------------------------------------
 
   evaluateTick(
@@ -399,7 +479,8 @@ class EmbeddedTradeStateMachine {
     timestamp: number,
     verdict: string,
     agreement: number,
-    authorityExitReason?: string | null,
+    authorityExitReason?:
+      string | null,
   ): {
     action:
       | "NONE"
@@ -489,7 +570,7 @@ class EmbeddedTradeStateMachine {
     }
 
     // ================================================================
-    // PHASE 3 — 0.001 ENTRY
+    // PHASE 3 — 0.001 FAVORABLE ENTRY
     // ================================================================
 
     if (
@@ -504,7 +585,9 @@ class EmbeddedTradeStateMachine {
 
       if (
         !signal ||
-        !Number.isFinite(signal)
+        !Number.isFinite(
+          signal,
+        )
       ) {
         return {
           action:
@@ -512,28 +595,8 @@ class EmbeddedTradeStateMachine {
         };
       }
 
-      /**
-       * ENTRY USES THE APPLICATION'S DECIMAL SCALE.
-       *
-       * Same ENTRY_BPS value for both LONG and SHORT.
-       *
-       * No *10000.
-       * No +1.
-       * No -1.
-       *
-       * The magnitude of movement from the signal must reach 0.001.
-       */
-      const movement =
-        Math.abs(
-          (
-            currentPrice -
-            signal
-          ) /
-          signal
-        );
-
       // --------------------------------------------------------------
-      // Opposite signal cancels pending entry
+      // CANCEL IF SIGNAL COMPLETELY INVERTS
       // --------------------------------------------------------------
 
       if (
@@ -546,11 +609,10 @@ class EmbeddedTradeStateMachine {
           isBull
         )
       ) {
-        this.context.state =
-          "FLAT";
-
-        this.context.side =
-          null;
+        this.resetToFlat(
+          verdict,
+          agreement,
+        );
 
         return {
           action:
@@ -559,19 +621,24 @@ class EmbeddedTradeStateMachine {
       }
 
       // --------------------------------------------------------------
-      // 0.001 ENTRY
+      // FAVORABLE MOVEMENT
+      // --------------------------------------------------------------
+
+      const favorableMovement =
+        this.calculateFavorableMovement(
+          currentPrice,
+          signal,
+          side,
+        );
+
+      // --------------------------------------------------------------
+      // ENTRY
       // --------------------------------------------------------------
 
       if (
-        movement >=
+        favorableMovement >=
         ENTRY_BPS
       ) {
-        /**
-         * ACTUAL FILL.
-         *
-         * This price becomes the zero reference
-         * for all subsequent PnL calculations.
-         */
         const entryPrice =
           currentPrice;
 
@@ -612,16 +679,14 @@ class EmbeddedTradeStateMachine {
     }
 
     // ================================================================
-    // PHASE 4 — MANAGE OPEN POSITION
+    // PHASE 4 — MANAGE POSITION
     // ================================================================
 
     if (
       this.context.state ===
         "OPEN" ||
       this.context.state ===
-        "MANAGING" ||
-      this.context.state ===
-        "HOLDING_STRETCH"
+        "MANAGING"
     ) {
       if (
         this.context.state ===
@@ -695,14 +760,7 @@ class EmbeddedTradeStateMachine {
       }
 
       // ==============================================================
-      // DIRECT PRICE TARGET / STOP DEFENSE
-      //
-      // These correspond exactly to:
-      //
-      //   +0.300 WIN
-      //   -0.300 LOSS
-      //
-      // calculated from the actual fill.
+      // DIRECT TARGET / STOP DEFENSE
       // ==============================================================
 
       if (
@@ -733,7 +791,11 @@ class EmbeddedTradeStateMachine {
             `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
           );
         }
-      } else {
+      }
+
+      if (
+        side === "short"
+      ) {
         if (
           currentPrice <=
           this.context.targetPrice
@@ -777,7 +839,7 @@ export const localPipelineStateMachine =
   new EmbeddedTradeStateMachine();
 
 // =====================================================================
-// CORE PIPELINE
+// GATE PIPELINE
 // =====================================================================
 
 const PIPELINE:
@@ -794,6 +856,10 @@ const PIPELINE:
 
 const COMPOSITE_THRESHOLD =
   0.0;
+
+// =====================================================================
+// PIPELINE TYPES
+// =====================================================================
 
 export interface PipelineInputs {
   twin: TwinSnapshot;
@@ -813,7 +879,7 @@ export interface ExtendedGateReport
 }
 
 // =====================================================================
-// MAIN GATE PIPELINE EXECUTION
+// MAIN PIPELINE
 // =====================================================================
 
 export function runPipeline(
@@ -830,7 +896,7 @@ export function runPipeline(
     null;
 
   // -------------------------------------------------------------------
-  // CURRENT ENGINE STATE BEFORE THIS TICK
+  // PRE-TICK ENGINE STATE
   // -------------------------------------------------------------------
 
   const liveEngineContext =
@@ -904,7 +970,7 @@ export function runPipeline(
   }
 
   // -------------------------------------------------------------------
-  // COMPOSITE
+  // COMPOSITE SCORE
   // -------------------------------------------------------------------
 
   let weightSum =
@@ -929,6 +995,10 @@ export function runPipeline(
       ? weighted /
         weightSum
       : 0;
+
+  // -------------------------------------------------------------------
+  // GATE STATUS
+  // -------------------------------------------------------------------
 
   const allGatesPassed =
     outcomes.length ===
@@ -956,7 +1026,7 @@ export function runPipeline(
       COMPOSITE_THRESHOLD;
 
   // -------------------------------------------------------------------
-  // EXTRACT G8 STRATEGIC EXIT SIGNAL
+  // G8 EXIT SIGNAL
   // -------------------------------------------------------------------
 
   const authorityEvidence =
@@ -964,6 +1034,7 @@ export function runPipeline(
       | {
           exitTriggered?:
             boolean;
+
           exitReason?:
             string;
         }
@@ -1006,25 +1077,31 @@ export function runPipeline(
 
     const agreement =
       inputs.ppg?.agreement ||
-      0.0;
+      0;
 
     // ---------------------------------------------------------------
-    // Only pass G8 exit when a position was already live.
+    // POSITION STATE BEFORE EXECUTION
     // ---------------------------------------------------------------
 
     const positionWasLive =
       liveEngineContext.state ===
         "OPEN" ||
       liveEngineContext.state ===
-        "MANAGING" ||
-      liveEngineContext.state ===
-        "HOLDING_STRETCH";
+        "MANAGING";
+
+    // ---------------------------------------------------------------
+    // G8 STRATEGIC EXIT
+    // ---------------------------------------------------------------
 
     const strategicExit =
       positionWasLive &&
       authorityExitTriggered
         ? authorityExitReason
         : null;
+
+    // ---------------------------------------------------------------
+    // ENGINE TICK
+    // ---------------------------------------------------------------
 
     const stateResult =
       localPipelineStateMachine
@@ -1041,8 +1118,6 @@ export function runPipeline(
 
     // ---------------------------------------------------------------
     // HARD GATE VETO
-    //
-    // A live position may still be settled by a hard gate veto.
     // ---------------------------------------------------------------
 
     if (
@@ -1059,9 +1134,7 @@ export function runPipeline(
         currentState.state ===
           "OPEN" ||
         currentState.state ===
-          "MANAGING" ||
-        currentState.state ===
-          "HOLDING_STRETCH"
+          "MANAGING"
       ) {
         const forcedResult =
           localPipelineStateMachine
@@ -1080,7 +1153,7 @@ export function runPipeline(
   }
 
   // -------------------------------------------------------------------
-  // FRESH POST-TICK STATE
+  // POST-TICK STATE
   // -------------------------------------------------------------------
 
   const finalEngineContext =
@@ -1111,4 +1184,4 @@ export function runPipeline(
     currentPositionState:
       finalEngineContext.state,
   };
-      }
+    }
