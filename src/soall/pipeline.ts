@@ -305,3 +305,68 @@ export function runPipeline(
     outcomes.push(outcome);
 
     if (!outcome.passed && outcome.hardVeto && failedAt === null) {
+      failedAt = outcome.gate;
+    }
+
+    if (outcome.passed) {
+      priorPasses.push(outcome.gate);
+    }
+  }
+
+  let weightSum = 0;
+  let weighted = 0;
+
+  for (const outcome of outcomes) {
+    weightSum += outcome.weight;
+    weighted += outcome.weight * outcome.score;
+  }
+
+  const compositeScore = weightSum > 0 ? weighted / weightSum : 0;
+
+  const allGatesPassed =
+    outcomes.length === PIPELINE.length &&
+    outcomes.every((outcome) => outcome.passed);
+
+  const authorityOutcome = outcomes.find(
+    (outcome) => outcome.gate === "G8_AUTHORITY",
+  );
+
+  const authorityPassed = authorityOutcome?.passed === true;
+
+  const tradeArmed =
+    authorityPassed &&
+    failedAt === null &&
+    compositeScore >= COMPOSITE_THRESHOLD;
+
+  let engineAction: "NONE" | "OPEN" | "CLOSE" = "NONE";
+
+  if (tradeArmed && inputs.twin?.last) {
+    const currentPrice = inputs.twin.last.price || inputs.twin.last.close || 0;
+    const timestamp = Date.now();
+    const verdict = inputs.ppg?.verdict || "LOCKED-BULL";
+    const agreement = inputs.ppg?.agreement || 0.85;
+
+    const stateResult = localPipelineStateMachine.evaluateTick(
+      currentPrice,
+      timestamp,
+      verdict,
+      agreement,
+      60,
+      20
+    );
+
+    engineAction = stateResult.action;
+  }
+
+  return {
+    outcomes,
+    failedAt,
+    allPassed: allGatesPassed,
+    compositeScore,
+    tradeArmed,
+    compositeThreshold: COMPOSITE_THRESHOLD,
+    twinSeq: inputs.twin.last?.twinSeq ?? -1,
+    engineAction,
+    currentPositionState: localPipelineStateMachine.getState().state,
+  };
+}
