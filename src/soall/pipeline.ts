@@ -26,7 +26,7 @@ import { g6Confidence } from "./gates/g6-confidence";
 import { g7Risk } from "./gates/g7-risk";
 import { g8Authority } from "./gates/g8-authority";
 
-// FIXED: Converted absolute path alias configuration to a concrete relative module lookup
+// FIXED: Calibrated relative path matching layout depth (src/soall -> src/lib)
 import { tradeStateMachine } from "../lib/trade-state-machine";
 
 import type {
@@ -173,10 +173,6 @@ export function runPipeline(
    * =====================================================================
    * SOVEREIGN TICK EVALUATION LOOP (Continuous Processing Execution)
    * =====================================================================
-   * We pull this block OUTSIDE the 'if (tradeArmed)' barrier.
-   * This guarantees that the tick flows through the state machine on
-   * every single millisecond calculation pass, allowing exits to trigger
-   * instantly when stop boundaries are hit, regardless of gate statuses.
    */
   let engineAction: "NONE" | "OPEN" | "CLOSE" = "NONE";
 
