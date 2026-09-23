@@ -148,7 +148,7 @@ class EmbeddedTradeStateMachine {
     side: null,
     signalPrice: 0,
     entryPrice: 0,
-    size: 1.0,
+    size: 0.001, // Standardized minimum demo quantity unit
     targetPrice: 0,
     stopPrice: 0,
     openedAt: 0,
@@ -215,7 +215,7 @@ class EmbeddedTradeStateMachine {
       side: null,
       signalPrice: 0,
       entryPrice: 0,
-      size: 1.0,
+      size: 0.001,
       targetPrice: 0,
       stopPrice: 0,
       openedAt: 0,
@@ -552,14 +552,23 @@ export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
   }
 
   // =====================================================================
-  // BRIDGE TO CLOUDFLARE WORKER / BINANCE TESTNET EXECUTION ROUTER
+  // BRIDGE TO CLOUDFLARE WORKER / BINANCE DEMO EXECUTION ROUTER
   // =====================================================================
   if (engineAction === "OPEN" || engineAction === "CLOSE") {
-    // Asynchronously transmit execution payload to your backend Worker endpoint
-    fetch(window.location.origin, {
+    const currentState = localPipelineStateMachine.getState();
+    const orderSide = currentState.side === "long" ? "BUY" : "SELL";
+    
+    // Transmit signed execution payload to the backend Cloudflare worker endpoint
+    fetch("/api/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(inputs),
+      body: JSON.stringify({
+        action: engineAction,
+        side: orderSide,
+        quantity: currentState.size,
+        symbol: inputs.twin.symbol || "BTCUSDT",
+        price: inputs.risk.currentPrice,
+      }),
     }).catch((err) => {
       console.error("Failed to dispatch execution signal to backend worker:", err);
     });
