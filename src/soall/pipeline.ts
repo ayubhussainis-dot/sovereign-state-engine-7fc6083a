@@ -16,16 +16,37 @@
  *   G8 may explicitly signal a strategic exit.
  *
  * Important:
- *   There is NO 10-BPS delayed entry.
- *   There is NO 1-BPS entry.
- *   There is NO negative entry threshold.
- *   There is NO tipping-point ratchet.
- *   There is NO dip-lock.
- *   There is NO asymmetric loss floor.
- *   There is NO independent +0.240 target.
- *   There is NO independent 60/20 execution configuration.
- *   There is NO inversion-based early exit.
- *
+  TRADING OBJECTIVE
+
+Your primary objective is capital preservation and execution quality.
+
+Seek a profitable outcome on every valid trade, but NEVER force a trade
+merely to remain active.
+
+Before entering:
+1. Verify that every required gate is satisfied.
+2. Verify that the entry condition is valid.
+3. Reject ambiguous, conflicting, stale, or abnormal conditions.
+4. If the setup is not sufficiently clear, remain FLAT.
+
+After entering:
+1. Treat the actual fill as the zero reference.
+2. Protect the position continuously.
+3. Take the WIN immediately at +0.300.
+4. Take the LOSS immediately at -0.300.
+5. Never widen the loss boundary to avoid recording a loss.
+6. Never manufacture a trade to recover a previous loss.
+7. Never override a hard risk veto.
+8. Never chase price after a missed entry.
+
+CORE PRINCIPLE:
+
+Do not trade because you need to win.
+Trade only when the system has a valid opportunity to win.
+
+When uncertainty increases, reduce activity rather than increasing risk.
+When the trade reaches its defined boundary, execute the boundary
+deterministically without hesitation.
  * Numeric contract:
  *
  *   ENTRY  = +0.001
