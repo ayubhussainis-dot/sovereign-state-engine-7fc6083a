@@ -552,13 +552,12 @@ export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
   }
 
   // =====================================================================
-  // BRIDGE TO CLOUDFLARE WORKER / BINANCE DEMO EXECUTION ROUTER
+  // BRIDGE TO BINANCE DEMO EXECUTION ROUTER
   // =====================================================================
   if (engineAction === "OPEN" || engineAction === "CLOSE") {
     const currentState = localPipelineStateMachine.getState();
     const orderSide = currentState.side === "long" ? "BUY" : "SELL";
     
-    // Transmit signed execution payload to the backend Cloudflare worker endpoint
     fetch("/api/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
