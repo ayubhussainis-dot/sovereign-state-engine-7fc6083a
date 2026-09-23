@@ -1,3 +1,4 @@
+import React, { useEffect, useState } from "react";
 import type { SDTState, TelemetryData } from "@/lib/SDTStateEngine";
 
 // Define the shape of the incoming live position data
@@ -30,6 +31,30 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
   sMultiplier,
   positionMetrics,
 }) => {
+  // Live polling state for Binance Demo account metrics
+  const [liveMetrics, setLiveMetrics] = useState<ActivePositionMetrics | null>(positionMetrics || null);
+
+  useEffect(() => {
+    const fetchLiveBinancePosition = async () => {
+      try {
+        const response = await fetch("/api/position");
+        if (response.ok) {
+          const data = await response.json();
+          setLiveMetrics(data);
+        }
+      } catch (error) {
+        console.error("Error syncing live position from Binance demo:", error);
+      }
+    };
+
+    fetchLiveBinancePosition();
+    const interval = setInterval(fetchLiveBinancePosition, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Prefer incoming prop if provided, otherwise fallback to live polled metrics
+  const activeMetrics = positionMetrics || liveMetrics;
+
   const isArrested = currentState === "P53_ARREST";
 
   return (
@@ -193,8 +218,8 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
             ACTIVE STRUCTURAL SYSTEM WEIGHT
           </span>
           <span className="text-sm font-bold text-amber-400">
-            {positionMetrics?.hasPosition 
-                ? `${(Math.abs(positionMetrics.positionAmt) * positionMetrics.leverage).toFixed(2)}x` 
+            {activeMetrics?.hasPosition 
+                ? `${(Math.abs(activeMetrics.positionAmt) * activeMetrics.leverage).toFixed(2)}x` 
                 : "0.00x"}
           </span>
         </div>
@@ -207,27 +232,27 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
             STRUCTURAL PAYLOAD TELEMETRY & WIN/LOSS TRACKER
         </div>
         
-        {positionMetrics?.hasPosition ? (
+        {activeMetrics?.hasPosition ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 font-mono text-xs">
                 <div className="border-l border-zinc-800 pl-2">
                     <span className="text-zinc-500 block mb-1">DIRECTION</span> 
-                    <span className={positionMetrics.positionAmt > 0 ? "text-emerald-500" : "text-red-500"}>
-                        {positionMetrics.positionAmt > 0 ? "LONG [▲]" : "SHORT [▼]"}
+                    <span className={activeMetrics.positionAmt > 0 ? "text-emerald-500" : "text-red-500"}>
+                        {activeMetrics.positionAmt > 0 ? "LONG [▲]" : "SHORT [▼]"}
                     </span>
                 </div>
                 <div className="border-l border-zinc-800 pl-2">
                     <span className="text-zinc-500 block mb-1">PAYLOAD MASS</span> 
-                    <span className="text-white">{Math.abs(positionMetrics.positionAmt)} BTC</span>
+                    <span className="text-white">{Math.abs(activeMetrics.positionAmt)} BTC</span>
                 </div>
                 <div className="border-l border-zinc-800 pl-2">
                     <span className="text-zinc-500 block mb-1">ENTRY ANCHOR</span> 
-                    <span className="text-white">${positionMetrics.entryPrice.toFixed(2)}</span>
+                    <span className="text-white">${activeMetrics.entryPrice.toFixed(2)}</span>
                 </div>
                 <div className="border-l border-zinc-800 pl-2">
                     <span className="text-zinc-500 block mb-1">DELTA [U.PNL]</span> 
-                    <span className={positionMetrics.unRealizedProfit >= 0 ? "text-emerald-500" : "text-red-500"}>
-                        {positionMetrics.unRealizedProfit >= 0 ? "+" : ""}
-                        {positionMetrics.unRealizedProfit.toFixed(4)} USDT
+                    <span className={activeMetrics.unRealizedProfit >= 0 ? "text-emerald-500" : "text-red-500"}>
+                        {activeMetrics.unRealizedProfit >= 0 ? "+" : ""}
+                        {activeMetrics.unRealizedProfit.toFixed(4)} USDT
                     </span>
                 </div>
             </div>
@@ -241,16 +266,16 @@ export const RihalDashboard: React.FC<RihalDashboardProps> = ({
         <div className="mt-4 pt-3 border-t border-zinc-900 grid grid-cols-3 gap-2 text-xs font-mono">
             <div className="bg-zinc-900/60 p-2 border border-zinc-800">
                 <span className="text-[10px] text-zinc-500 block">WINS (LOCKED)</span>
-                <span className="text-emerald-400 font-bold">{positionMetrics?.wins ?? 0} W</span>
+                <span className="text-emerald-400 font-bold">{activeMetrics?.wins ?? 0} W</span>
             </div>
             <div className="bg-zinc-900/60 p-2 border border-zinc-800">
                 <span className="text-[10px] text-zinc-500 block">LOSSES (CAPPED)</span>
-                <span className="text-red-400 font-bold">{positionMetrics?.losses ?? 0} L</span>
+                <span className="text-red-400 font-bold">{activeMetrics?.losses ?? 0} L</span>
             </div>
             <div className="bg-zinc-900/60 p-2 border border-zinc-800">
                 <span className="text-[10px] text-zinc-500 block">WIN-RATE RATIO</span>
                 <span className="text-amber-400 font-bold">
-                    {positionMetrics?.winRate ? `${positionMetrics.winRate.toFixed(1)}%` : '0.0%'}
+                    {activeMetrics?.winRate ? `${activeMetrics.winRate.toFixed(1)}%` : '0.0%'}
                 </span>
             </div>
         </div>
