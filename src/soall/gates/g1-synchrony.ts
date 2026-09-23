@@ -4,17 +4,23 @@
  * Dual-Authority Protection Layer:
  * 1. Physical Network Check: Validates live-twin synchronization latency.
  * 2. Asymmetric Breakout Trap: Forces the application to stand flat during
- *    the initial 10-bps crowd panic zone, entering only at the trough.
+ *    the initial 1-bps buffer zone, entering only at the trough.
  *
  * Contract:
  *   Deterministic · Pure · No side effects · Replay safe.
+ * 
+ * Locked Execution Bounds:
+ *   - Entry Buffer: 1.0 bps
+ *   - Base Size: 0.001
+ *   - Target Win (TP): +30 bps
+ *   - Target Loss (SL): -30 bps
  */
 
 import type { Gate, GateOutcome } from "../types";
 
 const SYNCHRONIZED_LATENCY_MS = 35.0;
 const MAX_EXECUTION_LATENCY_MS = 100.0;
-const TRAP_BUFFER_BPS = 10.0; // The sovereign crowd-flush threshold
+const TRAP_BUFFER_BPS = 1.0; // Locked to the 1 BPS starting buffer
 
 const clamp01 = (value: number): number =>
   Math.max(0, Math.min(1, value));
@@ -60,7 +66,10 @@ export const g1Synchrony: Gate = ({
         executionSafe,
         twinSeq: last?.twinSeq ?? -1,
         trapState: risk?.positionState ?? "UNKNOWN",
-        currentDriftBps: 0
+        currentDriftBps: 0,
+        targetSize: 0.001,
+        targetWinBps: 30.0,
+        targetLossBps: -30.0
       },
       reason: `Clock UNSYNCHRONIZED · latency=${latencyMs.toFixed(2)}ms · Network execution blocked.`,
       specified: true
@@ -82,19 +91,19 @@ export const g1Synchrony: Gate = ({
     const multiplier = side === "long" ? -1 : 1;
     currentDriftBps = ((currentPrice - risk.signalPrice) / risk.signalPrice) * multiplier * 10000;
 
-    // G1 only unlocks if the price flushes exactly 10 bps or deeper against the trend signal
+    // G1 only unlocks if the price flushes exactly 1 bps or deeper against the trend signal
     strategyPassed = currentDriftBps >= TRAP_BUFFER_BPS;
     
     strategicReason = strategyPassed
       ? `TRAP_SPRUNG · Market flushed ${currentDriftBps.toFixed(2)}bps · Entry Authorized.`
-      : `DETACHED_MONITORING · Crowd panic tracking active · Drift: ${currentDriftBps.toFixed(2)}bps / Target: ${TRAP_BUFFER_BPS}bps.`;
+      : `DETACHED_MONITORING · Drift tracking active · Drift: ${currentDriftBps.toFixed(2)}bps / Target: ${TRAP_BUFFER_BPS}bps.`;
   } else if (risk && risk.positionState === "FLAT") {
     strategicReason = "FLAT_STATE · Standby pattern active · Awaiting consensus initialization.";
   } else {
     strategicReason = "POSITION_OPEN · Surfing mechanics live · Processing active loop boundaries.";
   }
 
-  // G1 fully passes ONLY if the network is perfectly safe AND the 10 bps trap has cleanly sprung
+  // G1 fully passes ONLY if the network is perfectly safe AND the 1 bps trap has cleanly sprung
   const finalPassedState = physicalNetworkPassed && strategyPassed;
 
   return {
@@ -123,7 +132,12 @@ export const g1Synchrony: Gate = ({
       trapState: risk?.positionState ?? "FLAT",
       currentDriftBps: parseFloat(currentDriftBps.toFixed(4)),
       trapBufferBps: TRAP_BUFFER_BPS,
-      signalAnchorPrice: risk?.signalPrice ?? 0
+      signalAnchorPrice: risk?.signalPrice ?? 0,
+
+      // Deterministic execution bounds injected for downstream order router
+      targetSize: 0.001,
+      targetWinBps: 30.0,
+      targetLossBps: -30.0
     },
 
     reason: !hasTick
