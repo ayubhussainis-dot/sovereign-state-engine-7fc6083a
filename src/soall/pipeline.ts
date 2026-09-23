@@ -134,23 +134,8 @@ export interface TradeCycleRecord {
 // AUTHORITATIVE NUMERIC CONTRACT
 // =====================================================================
 
-/**
- * Entry threshold (1 BPS).
- *
- * Same threshold for LONG and SHORT.
- *
- * The movement must be FAVORABLE to the selected side.
- */
 const ENTRY_BPS = 0.0001;
-
-/**
- * Winning boundary from ACTUAL FILL (30 BPS).
- */
 const TARGET_WIN_BPS = 0.0030;
-
-/**
- * Losing boundary from ACTUAL FILL (-30 BPS).
- */
 const MAX_LOSS_BPS = -0.0030;
 
 // =====================================================================
@@ -160,242 +145,84 @@ const MAX_LOSS_BPS = -0.0030;
 class EmbeddedTradeStateMachine {
   private context: PositionContext = {
     state: "FLAT",
-
     side: null,
-
     signalPrice: 0,
-
     entryPrice: 0,
-
     size: 1.0,
-
     targetPrice: 0,
-
     stopPrice: 0,
-
     openedAt: 0,
-
     fusionSnapshot: {
       verdict: "SILENT",
       agreement: 0,
     },
-
     ALI3N: "ACTIVE",
   };
 
   private ledger: TradeCycleRecord[] = [];
-
   private lastVerdictChange = 0;
-
-  private readonly debounceWindowMs =
-    2000;
-
-  // -------------------------------------------------------------------
-  // STATE ACCESS
-  // -------------------------------------------------------------------
+  private readonly debounceWindowMs = 2000;
 
   getState(): PositionContext {
-    return {
-      ...this.context,
-    };
+    return { ...this.context };
   }
 
   getLedger(): readonly TradeCycleRecord[] {
     return this.ledger;
   }
 
-  // -------------------------------------------------------------------
-  // DIRECTION
-  // -------------------------------------------------------------------
-
-  /**
-   * Returns the directional multiplier used throughout the engine.
-   *
-   * LONG:
-   *   price ↑ = favorable
-   *
-   * SHORT:
-   *   price ↓ = favorable
-   */
-  private getDirectionMultiplier(
-    side: Side,
-  ): number {
-    return side === "long"
-      ? 1
-      : -1;
+  private getDirectionMultiplier(side: Side): number {
+    return side === "long" ? 1 : -1;
   }
 
-  // -------------------------------------------------------------------
-  // DECIMAL MOVEMENT
-  // -------------------------------------------------------------------
-
-  /**
-   * Calculates favorable movement from signal.
-   *
-   * Result is in the application's decimal scale.
-   *
-   * Example:
-   *
-   * LONG:
-   *   +0.0001 = favorable
-   *
-   * SHORT:
-   *   underlying price falls
-   *   normalized result = +0.0001
-   */
   private calculateFavorableMovement(
     currentPrice: number,
     signalPrice: number,
     side: Side,
   ): number {
-    if (
-      !signalPrice ||
-      !Number.isFinite(signalPrice)
-    ) {
+    if (!signalPrice || !Number.isFinite(signalPrice)) {
       return 0;
     }
-
-    const multiplier =
-      this.getDirectionMultiplier(
-        side,
-      );
-
-    return (
-      (
-        (
-          currentPrice -
-          signalPrice
-        ) /
-        signalPrice
-      ) *
-      multiplier
-    );
+    const multiplier = this.getDirectionMultiplier(side);
+    return ((currentPrice - signalPrice) / signalPrice) * multiplier;
   }
 
-  // -------------------------------------------------------------------
-  // PNL
-  // -------------------------------------------------------------------
-
-  /**
-   * Calculates PnL FROM ACTUAL FILL.
-   *
-   * Application decimal scale:
-   *
-   *   +0.0030 = WIN
-   *   -0.0030 = LOSS
-   */
   private calculatePnLBps(
     currentPrice: number,
     entryPrice: number,
     side: Side,
   ): number {
-    if (
-      !entryPrice ||
-      !Number.isFinite(entryPrice)
-    ) {
+    if (!entryPrice || !Number.isFinite(entryPrice)) {
       return 0;
     }
-
-    const multiplier =
-      this.getDirectionMultiplier(
-        side,
-      );
-
-    return (
-      (
-        (
-          currentPrice -
-          entryPrice
-        ) /
-        entryPrice
-      ) *
-      multiplier
-    );
+    const multiplier = this.getDirectionMultiplier(side);
+    return ((currentPrice - entryPrice) / entryPrice) * multiplier;
   }
 
-  // -------------------------------------------------------------------
-  // TARGET PRICE
-  // -------------------------------------------------------------------
-
-  private calculateTargetPrice(
-    entryPrice: number,
-    side: Side,
-  ): number {
-    const multiplier =
-      this.getDirectionMultiplier(
-        side,
-      );
-
-    return (
-      entryPrice *
-      (
-        1 +
-        multiplier *
-        TARGET_WIN_BPS
-      )
-    );
+  private calculateTargetPrice(entryPrice: number, side: Side): number {
+    const multiplier = this.getDirectionMultiplier(side);
+    return entryPrice * (1 + multiplier * TARGET_WIN_BPS);
   }
 
-  // -------------------------------------------------------------------
-  // STOP PRICE
-  // -------------------------------------------------------------------
-
-  private calculateStopPrice(
-    entryPrice: number,
-    side: Side,
-  ): number {
-    const multiplier =
-      this.getDirectionMultiplier(
-        side,
-      );
-
-    return (
-      entryPrice *
-      (
-        1 +
-        multiplier *
-        MAX_LOSS_BPS
-      )
-    );
+  private calculateStopPrice(entryPrice: number, side: Side): number {
+    const multiplier = this.getDirectionMultiplier(side);
+    return entryPrice * (1 + multiplier * MAX_LOSS_BPS);
   }
 
-  // -------------------------------------------------------------------
-  // RESET
-  // -------------------------------------------------------------------
-
-  private resetToFlat(
-    verdict: string,
-    agreement: number,
-  ): void {
+  private resetToFlat(verdict: string, agreement: number): void {
     this.context = {
       state: "FLAT",
-
       side: null,
-
       signalPrice: 0,
-
       entryPrice: 0,
-
       size: 1.0,
-
       targetPrice: 0,
-
       stopPrice: 0,
-
       openedAt: 0,
-
-      fusionSnapshot: {
-        verdict,
-        agreement,
-      },
-
+      fusionSnapshot: { verdict, agreement },
       ALI3N: "ACTIVE",
     };
   }
-
-  // -------------------------------------------------------------------
-  // SETTLEMENT
-  // -------------------------------------------------------------------
 
   private settlePosition(
     currentPrice: number,
@@ -407,315 +234,114 @@ class EmbeddedTradeStateMachine {
     action: "CLOSE";
     record: TradeCycleRecord;
   } {
-    const side =
-      this.context.side!;
+    const side = this.context.side!;
+    const entry = this.context.entryPrice;
+    const pnl = this.calculatePnLBps(currentPrice, entry, side);
 
-    const entry =
-      this.context.entryPrice;
-
-    const pnl =
-      this.calculatePnLBps(
-        currentPrice,
-        entry,
-        side,
-      );
-
-    this.context.state =
-      "CLOSING";
+    this.context.state = "CLOSING";
 
     const record: TradeCycleRecord = {
-      id:
-        `cycle-${Date.now()}`,
-
+      id: `cycle-${Date.now()}`,
       side,
-
-      signalPrice:
-        this.context.signalPrice,
-
-      entryPrice:
-        entry,
-
-      exitPrice:
-        currentPrice,
-
-      pnlBps:
-        pnl,
-
+      signalPrice: this.context.signalPrice,
+      entryPrice: entry,
+      exitPrice: currentPrice,
+      pnlBps: pnl,
       reason,
-
-      openedAt:
-        this.context.openedAt,
-
-      closedAt:
-        timestamp,
-
-      ALI3N:
-        "SETTLED",
+      openedAt: this.context.openedAt,
+      closedAt: timestamp,
+      ALI3N: "SETTLED",
     };
 
-    this.ledger.push(
-      record,
-    );
-
-    this.resetToFlat(
-      verdict,
-      agreement,
-    );
+    this.ledger.push(record);
+    this.resetToFlat(verdict, agreement);
 
     return {
-      action:
-        "CLOSE",
-
+      action: "CLOSE",
       record,
     };
   }
-
-  // -------------------------------------------------------------------
-  // TICK ENGINE
-  // -------------------------------------------------------------------
 
   evaluateTick(
     currentPrice: number,
     timestamp: number,
     verdict: string,
     agreement: number,
-    authorityExitReason?:
-      string | null,
+    authorityExitReason?: string | null,
   ): {
-    action:
-      | "NONE"
-      | "OPEN"
-      | "CLOSE";
-
-    record?:
-      TradeCycleRecord;
+    action: "NONE" | "OPEN" | "CLOSE";
+    record?: TradeCycleRecord;
   } {
-    const isBull =
-      verdict ===
-      "LOCKED-BULL";
+    const isBull = verdict === "LOCKED-BULL";
+    const isBear = verdict === "LOCKED-BEAR";
 
-    const isBear =
-      verdict ===
-      "LOCKED-BEAR";
-
-    // ================================================================
     // PHASE 1 — ARM
-    // ================================================================
-
-    if (
-      timestamp -
-        this.lastVerdictChange >
-      this.debounceWindowMs
-    ) {
-      if (
-        this.context.state ===
-          "FLAT" &&
-        (isBull || isBear) &&
-        agreement > 0.75
-      ) {
-        this.context.state =
-          "ARMED";
-
-        this.lastVerdictChange =
-          timestamp;
+    if (timestamp - this.lastVerdictChange > this.debounceWindowMs) {
+      if (this.context.state === "FLAT" && (isBull || isBear) && agreement > 0.75) {
+        this.context.state = "ARMED";
+        this.lastVerdictChange = timestamp;
       }
     }
 
-    // ================================================================
     // PHASE 2 — CREATE SIGNAL
-    // ================================================================
-
-    if (
-      this.context.state ===
-      "ARMED"
-    ) {
-      const side: Side =
-        isBull
-          ? "long"
-          : "short";
-
+    if (this.context.state === "ARMED") {
+      const side: Side = isBull ? "long" : "short";
       this.context = {
         ...this.context,
-
-        state:
-          "TRAPPING",
-
+        state: "TRAPPING",
         side,
-
-        signalPrice:
-          currentPrice,
-
-        entryPrice:
-          0,
-
-        targetPrice:
-          0,
-
-        stopPrice:
-          0,
-
-        openedAt:
-          timestamp,
-
-        fusionSnapshot: {
-          verdict,
-          agreement,
-        },
+        signalPrice: currentPrice,
+        entryPrice: 0,
+        targetPrice: 0,
+        stopPrice: 0,
+        openedAt: timestamp,
+        fusionSnapshot: { verdict, agreement },
       };
-
-      return {
-        action:
-          "NONE",
-      };
+      return { action: "NONE" };
     }
 
-    // ================================================================
     // PHASE 3 — 1 BPS FAVORABLE ENTRY
-    // ================================================================
+    if (this.context.state === "TRAPPING") {
+      const side = this.context.side!;
+      const signal = this.context.signalPrice;
 
-    if (
-      this.context.state ===
-      "TRAPPING"
-    ) {
-      const side =
-        this.context.side!;
-
-      const signal =
-        this.context.signalPrice;
-
-      if (
-        !signal ||
-        !Number.isFinite(
-          signal,
-        )
-      ) {
-        return {
-          action:
-            "NONE",
-        };
+      if (!signal || !Number.isFinite(signal)) {
+        return { action: "NONE" };
       }
 
-      // --------------------------------------------------------------
-      // CANCEL IF SIGNAL COMPLETELY INVERTS
-      // --------------------------------------------------------------
-
-      if (
-        (
-          side === "long" &&
-          isBear
-        ) ||
-        (
-          side === "short" &&
-          isBull
-        )
-      ) {
-        this.resetToFlat(
-          verdict,
-          agreement,
-        );
-
-        return {
-          action:
-            "NONE",
-        };
+      if ((side === "long" && isBear) || (side === "short" && isBull)) {
+        this.resetToFlat(verdict, agreement);
+        return { action: "NONE" };
       }
 
-      // --------------------------------------------------------------
-      // FAVORABLE MOVEMENT
-      // --------------------------------------------------------------
+      const favorableMovement = this.calculateFavorableMovement(currentPrice, signal, side);
 
-      const favorableMovement =
-        this.calculateFavorableMovement(
-          currentPrice,
-          signal,
-          side,
-        );
-
-      // --------------------------------------------------------------
-      // ENTRY
-      // --------------------------------------------------------------
-
-      if (
-        favorableMovement >=
-        ENTRY_BPS
-      ) {
-        const entryPrice =
-          currentPrice;
-
+      if (favorableMovement >= ENTRY_BPS) {
+        const entryPrice = currentPrice;
         this.context = {
           ...this.context,
-
-          state:
-            "OPEN",
-
+          state: "OPEN",
           entryPrice,
-
-          targetPrice:
-            this.calculateTargetPrice(
-              entryPrice,
-              side,
-            ),
-
-          stopPrice:
-            this.calculateStopPrice(
-              entryPrice,
-              side,
-            ),
-
-          openedAt:
-            timestamp,
+          targetPrice: this.calculateTargetPrice(entryPrice, side),
+          stopPrice: this.calculateStopPrice(entryPrice, side),
+          openedAt: timestamp,
         };
-
-        return {
-          action:
-            "OPEN",
-        };
+        return { action: "OPEN" };
       }
-
-      return {
-        action:
-          "NONE",
-      };
+      return { action: "NONE" };
     }
 
-    // ================================================================
     // PHASE 4 — MANAGE POSITION
-    // ================================================================
-
-    if (
-      this.context.state ===
-        "OPEN" ||
-      this.context.state ===
-        "MANAGING"
-    ) {
-      if (
-        this.context.state ===
-        "OPEN"
-      ) {
-        this.context.state =
-          "MANAGING";
+    if (this.context.state === "OPEN" || this.context.state === "MANAGING") {
+      if (this.context.state === "OPEN") {
+        this.context.state = "MANAGING";
       }
 
-      const side =
-        this.context.side!;
+      const side = this.context.side!;
+      const entry = this.context.entryPrice;
+      const currentPnLBps = this.calculatePnLBps(currentPrice, entry, side);
 
-      const entry =
-        this.context.entryPrice;
-
-      const currentPnLBps =
-        this.calculatePnLBps(
-          currentPrice,
-          entry,
-          side,
-        );
-
-      // ==============================================================
-      // G8 AUTHORITY EXIT
-      // ==============================================================
-
-      if (
-        authorityExitReason
-      ) {
+      if (authorityExitReason) {
         return this.settlePosition(
           currentPrice,
           timestamp,
@@ -725,14 +351,7 @@ class EmbeddedTradeStateMachine {
         );
       }
 
-      // ==============================================================
-      // +30 BPS = WIN
-      // ==============================================================
-
-      if (
-        currentPnLBps >=
-        TARGET_WIN_BPS
-      ) {
+      if (currentPnLBps >= TARGET_WIN_BPS) {
         return this.settlePosition(
           currentPrice,
           timestamp,
@@ -742,14 +361,7 @@ class EmbeddedTradeStateMachine {
         );
       }
 
-      // ==============================================================
-      // -30 BPS = LOSS
-      // ==============================================================
-
-      if (
-        currentPnLBps <=
-        MAX_LOSS_BPS
-      ) {
+      if (currentPnLBps <= MAX_LOSS_BPS) {
         return this.settlePosition(
           currentPrice,
           timestamp,
@@ -759,17 +371,8 @@ class EmbeddedTradeStateMachine {
         );
       }
 
-      // ==============================================================
-      // DIRECT TARGET / STOP DEFENSE
-      // ==============================================================
-
-      if (
-        side === "long"
-      ) {
-        if (
-          currentPrice >=
-          this.context.targetPrice
-        ) {
+      if (side === "long") {
+        if (currentPrice >= this.context.targetPrice) {
           return this.settlePosition(
             currentPrice,
             timestamp,
@@ -778,11 +381,7 @@ class EmbeddedTradeStateMachine {
             `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
           );
         }
-
-        if (
-          currentPrice <=
-          this.context.stopPrice
-        ) {
+        if (currentPrice <= this.context.stopPrice) {
           return this.settlePosition(
             currentPrice,
             timestamp,
@@ -793,13 +392,8 @@ class EmbeddedTradeStateMachine {
         }
       }
 
-      if (
-        side === "short"
-      ) {
-        if (
-          currentPrice <=
-          this.context.targetPrice
-        ) {
+      if (side === "short") {
+        if (currentPrice <= this.context.targetPrice) {
           return this.settlePosition(
             currentPrice,
             timestamp,
@@ -808,11 +402,7 @@ class EmbeddedTradeStateMachine {
             `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
           );
         }
-
-        if (
-          currentPrice >=
-          this.context.stopPrice
-        ) {
+        if (currentPrice >= this.context.stopPrice) {
           return this.settlePosition(
             currentPrice,
             timestamp,
@@ -824,42 +414,24 @@ class EmbeddedTradeStateMachine {
       }
     }
 
-    return {
-      action:
-        "NONE",
-    };
+    return { action: "NONE" };
   }
 }
 
-// =====================================================================
-// SINGLE EMBEDDED ENGINE INSTANCE
-// =====================================================================
+export const localPipelineStateMachine = new EmbeddedTradeStateMachine();
 
-export const localPipelineStateMachine =
-  new EmbeddedTradeStateMachine();
+const PIPELINE: readonly Gate[] = [
+  g1Synchrony,
+  g2Structure,
+  g3Confluence,
+  g4Pattern,
+  g5Examination,
+  g6Confidence,
+  g7Risk,
+  g8Authority,
+];
 
-// =====================================================================
-// GATE PIPELINE
-// =====================================================================
-
-const PIPELINE:
-  readonly Gate[] = [
-    g1Synchrony,
-    g2Structure,
-    g3Confluence,
-    g4Pattern,
-    g5Examination,
-    g6Confidence,
-    g7Risk,
-    g8Authority,
-  ];
-
-const COMPOSITE_THRESHOLD =
-  0.0;
-
-// =====================================================================
-// PIPELINE TYPES
-// =====================================================================
+const COMPOSITE_THRESHOLD = 0.0;
 
 export interface PipelineInputs {
   twin: TwinSnapshot;
@@ -867,321 +439,143 @@ export interface PipelineInputs {
   risk: RiskContext;
 }
 
-export interface ExtendedGateReport
-  extends GateReport {
-  engineAction:
-    | "NONE"
-    | "OPEN"
-    | "CLOSE";
-
-  currentPositionState:
-    string;
+export interface ExtendedGateReport extends GateReport {
+  engineAction: "NONE" | "OPEN" | "CLOSE";
+  currentPositionState: string;
 }
 
-// =====================================================================
-// MAIN PIPELINE
-// =====================================================================
+export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
+  const outcomes: GateOutcome[] = [];
+  const priorPasses: GateId[] = [];
+  let failedAt: GateId | null = null;
 
-export function runPipeline(
-  inputs: PipelineInputs,
-): ExtendedGateReport {
-  const outcomes:
-    GateOutcome[] = [];
+  const liveEngineContext = localPipelineStateMachine.getState();
 
-  const priorPasses:
-    GateId[] = [];
-
-  let failedAt:
-    GateId | null =
-    null;
-
-  // -------------------------------------------------------------------
-  // PRE-TICK ENGINE STATE
-  // -------------------------------------------------------------------
-
-  const liveEngineContext =
-    localPipelineStateMachine
-      .getState();
-
-  inputs.risk.positionState =
-    liveEngineContext.state;
-
-  inputs.risk.positionSide =
-    liveEngineContext.side;
-
-  inputs.risk.entryPrice =
-    liveEngineContext.entryPrice;
-
-  inputs.risk.signalPrice =
-    liveEngineContext.signalPrice;
-
+  inputs.risk.positionState = liveEngineContext.state;
+  inputs.risk.positionSide = liveEngineContext.side;
+  inputs.risk.entryPrice = liveEngineContext.entryPrice;
+  inputs.risk.signalPrice = liveEngineContext.signalPrice;
   inputs.risk.currentPrice =
-    inputs.twin.last?.price ||
-    inputs.twin.last?.close ||
-    0;
+    inputs.twin.last?.price || inputs.twin.last?.close || 0;
 
-  // -------------------------------------------------------------------
-  // G1 → G8
-  // -------------------------------------------------------------------
+  for (const gate of PIPELINE) {
+    const gateInputs: GateInputs = {
+      twin: inputs.twin,
+      ppg: inputs.ppg,
+      risk: inputs.risk,
+      priorPasses: priorPasses.slice(),
+    };
 
-  for (
-    const gate of PIPELINE
-  ) {
-    const gateInputs:
-      GateInputs = {
-        twin:
-          inputs.twin,
+    const outcome = gate(gateInputs);
+    outcomes.push(outcome);
 
-        ppg:
-          inputs.ppg,
-
-        risk:
-          inputs.risk,
-
-        priorPasses:
-          priorPasses.slice(),
-      };
-
-    const outcome =
-      gate(
-        gateInputs,
-      );
-
-    outcomes.push(
-      outcome,
-    );
-
-    if (
-      !outcome.passed &&
-      outcome.hardVeto &&
-      failedAt === null
-    ) {
-      failedAt =
-        outcome.gate;
+    if (!outcome.passed && outcome.hardVeto && failedAt === null) {
+      failedAt = outcome.gate;
     }
 
-    if (
-      outcome.passed
-    ) {
-      priorPasses.push(
-        outcome.gate,
-      );
+    if (outcome.passed) {
+      priorPasses.push(outcome.gate);
     }
   }
 
-  // -------------------------------------------------------------------
-  // COMPOSITE SCORE
-  // -------------------------------------------------------------------
+  let weightSum = 0;
+  let weighted = 0;
 
-  let weightSum =
-    0;
-
-  let weighted =
-    0;
-
-  for (
-    const outcome of outcomes
-  ) {
-    weightSum +=
-      outcome.weight;
-
-    weighted +=
-      outcome.weight *
-      outcome.score;
+  for (const outcome of outcomes) {
+    weightSum += outcome.weight;
+    weighted += outcome.weight * outcome.score;
   }
 
-  const compositeScore =
-    weightSum > 0
-      ? weighted /
-        weightSum
-      : 0;
-
-  // -------------------------------------------------------------------
-  // GATE STATUS
-  // -------------------------------------------------------------------
+  const compositeScore = weightSum > 0 ? weighted / weightSum : 0;
 
   const allGatesPassed =
-    outcomes.length ===
-      PIPELINE.length &&
-    outcomes.every(
-      (outcome) =>
-        outcome.passed,
-    );
+    outcomes.length === PIPELINE.length &&
+    outcomes.every((outcome) => outcome.passed);
 
-  const authorityOutcome =
-    outcomes.find(
-      (outcome) =>
-        outcome.gate ===
-        "G8_AUTHORITY",
-    );
+  const authorityOutcome = outcomes.find(
+    (outcome) => outcome.gate === "G8_AUTHORITY",
+  );
 
-  const authorityPassed =
-    authorityOutcome?.passed ===
-    true;
+  const authorityPassed = authorityOutcome?.passed === true;
 
   const tradeArmed =
-    authorityPassed &&
-    failedAt === null &&
-    compositeScore >=
-      COMPOSITE_THRESHOLD;
+    authorityPassed && failedAt === null && compositeScore >= COMPOSITE_THRESHOLD;
 
-  // -------------------------------------------------------------------
-  // G8 EXIT SIGNAL
-  // -------------------------------------------------------------------
+  const authorityEvidence = authorityOutcome?.evidence as
+    | { exitTriggered?: boolean; exitReason?: string }
+    | undefined;
 
-  const authorityEvidence =
-    authorityOutcome?.evidence as
-      | {
-          exitTriggered?:
-            boolean;
+  const authorityExitTriggered = authorityEvidence?.exitTriggered === true;
+  const authorityExitReason = authorityEvidence?.exitReason || "G8_EXIT";
 
-          exitReason?:
-            string;
-        }
-      | undefined;
+  let engineAction: "NONE" | "OPEN" | "CLOSE" = "NONE";
 
-  const authorityExitTriggered =
-    authorityEvidence
-      ?.exitTriggered ===
-    true;
-
-  const authorityExitReason =
-    authorityEvidence
-      ?.exitReason ||
-    "G8_EXIT";
-
-  // -------------------------------------------------------------------
-  // EXECUTION
-  // -------------------------------------------------------------------
-
-  let engineAction:
-    | "NONE"
-    | "OPEN"
-    | "CLOSE" =
-    "NONE";
-
-  if (
-    inputs.twin?.last
-  ) {
+  if (inputs.twin?.last) {
     const currentPrice =
-      inputs.twin.last.price ||
-      inputs.twin.last.close ||
-      0;
-
-    const timestamp =
-      Date.now();
-
-    const verdict =
-      inputs.ppg?.verdict ||
-      "SILENT";
-
-    const agreement =
-      inputs.ppg?.agreement ||
-      0;
-
-    // ---------------------------------------------------------------
-    // POSITION STATE BEFORE EXECUTION
-    // ---------------------------------------------------------------
+      inputs.twin.last.price || inputs.twin.last.close || 0;
+    const timestamp = Date.now();
+    const verdict = inputs.ppg?.verdict || "SILENT";
+    const agreement = inputs.ppg?.agreement || 0;
 
     const positionWasLive =
-      liveEngineContext.state ===
-        "OPEN" ||
-      liveEngineContext.state ===
-        "MANAGING";
-
-    // ---------------------------------------------------------------
-    // G8 STRATEGIC EXIT
-    // ---------------------------------------------------------------
+      liveEngineContext.state === "OPEN" ||
+      liveEngineContext.state === "MANAGING";
 
     const strategicExit =
-      positionWasLive &&
-      authorityExitTriggered
+      positionWasLive && authorityExitTriggered
         ? authorityExitReason
         : null;
 
-    // ---------------------------------------------------------------
-    // ENGINE TICK
-    // ---------------------------------------------------------------
+    const stateResult = localPipelineStateMachine.evaluateTick(
+      currentPrice,
+      timestamp,
+      verdict,
+      agreement,
+      strategicExit,
+    );
 
-    const stateResult =
-      localPipelineStateMachine
-        .evaluateTick(
+    engineAction = stateResult.action;
+
+    if (engineAction === "NONE" && !tradeArmed && positionWasLive) {
+      const currentState = localPipelineStateMachine.getState();
+      if (currentState.state === "OPEN" || currentState.state === "MANAGING") {
+        const forcedResult = localPipelineStateMachine.evaluateTick(
           currentPrice,
           timestamp,
           verdict,
           agreement,
-          strategicExit,
+          "HARD_GATE_VETO",
         );
-
-    engineAction =
-      stateResult.action;
-
-    // ---------------------------------------------------------------
-    // HARD GATE VETO
-    // ---------------------------------------------------------------
-
-    if (
-      engineAction ===
-        "NONE" &&
-      !tradeArmed &&
-      positionWasLive
-    ) {
-      const currentState =
-        localPipelineStateMachine
-          .getState();
-
-      if (
-        currentState.state ===
-          "OPEN" ||
-        currentState.state ===
-          "MANAGING"
-      ) {
-        const forcedResult =
-          localPipelineStateMachine
-            .evaluateTick(
-              currentPrice,
-              timestamp,
-              verdict,
-              agreement,
-              "HARD_GATE_VETO",
-            );
-
-        engineAction =
-          forcedResult.action;
+        engineAction = forcedResult.action;
       }
     }
   }
 
-  // -------------------------------------------------------------------
-  // POST-TICK STATE
-  // -------------------------------------------------------------------
+  // =====================================================================
+  // BRIDGE TO CLOUDFLARE WORKER / BINANCE TESTNET EXECUTION ROUTER
+  // =====================================================================
+  if (engineAction === "OPEN" || engineAction === "CLOSE") {
+    // Asynchronously transmit execution payload to your backend Worker endpoint
+    fetch(window.location.origin, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(inputs),
+    }).catch((err) => {
+      console.error("Failed to dispatch execution signal to backend worker:", err);
+    });
+  }
 
-  const finalEngineContext =
-    localPipelineStateMachine
-      .getState();
+  const finalEngineContext = localPipelineStateMachine.getState();
 
   return {
     outcomes,
-
     failedAt,
-
-    allPassed:
-      allGatesPassed,
-
+    allPassed: allGatesPassed,
     compositeScore,
-
     tradeArmed,
-
-    compositeThreshold:
-      COMPOSITE_THRESHOLD,
-
-    twinSeq:
-      inputs.twin.last?.twinSeq ??
-      -1,
-
+    compositeThreshold: COMPOSITE_THRESHOLD,
+    twinSeq: inputs.twin.last?.twinSeq ?? -1,
     engineAction,
-
-    currentPositionState:
-      finalEngineContext.state,
+    currentPositionState: finalEngineContext.state,
   };
 }
