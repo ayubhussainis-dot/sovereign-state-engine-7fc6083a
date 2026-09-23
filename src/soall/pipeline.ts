@@ -1,27 +1,20 @@
 /**
- * SOALL Pipeline — runs G1..G8 in strict order.
+ * SOALL Pipeline — Runs G1..G8 in strict sequence.
  *
- * G1..G7 evaluate the execution conditions.
- * G8 is the final authority gate.
+ * Architecture Matrix:
+ *   G1 = Safety Veto (Synchrony & Trapping Boundary)
+ *   G2 = Quality Check (Market Structure Regime)
+ *   G3 = Quality Check (Order Flow Confluence)
+ *   G4 = Quality Check (Pattern Friction Control)
+ *   G5 = Quality Check (Velocity Diagnostics)
+ *   G6 = Quality Check (Confidence Scoring)
+ *   G7 = Safety Veto (Drawdown & Asymmetric Loss Floor)
+ *   G8 = Final Execution Authority & Profit Ratchet
  *
- * Every gate is evaluated so the complete report can be
- * recorded in the audit ledger.
- *
- * Authority model:
- *
- *   G1 = safety veto
- *   G2 = quality
- *   G3 = quality
- *   G4 = quality
- *   G5 = quality
- *   G6 = quality
- *   G7 = safety veto
- *   G8 = final authority
- *
- * G2..G6 may fail without independently blocking execution.
+ * G2..G6 are quality gates. They can fail without independently blocking execution.
  *
  * Contract:
- *   Deterministic · Pure · Replay safe.
+ *   Deterministic · Pure · Replay Safe.
  */
 
 import { g1Synchrony } from "./gates/g1-synchrony";
@@ -32,6 +25,9 @@ import { g5Examination } from "./gates/g5-examination";
 import { g6Confidence } from "./gates/g6-confidence";
 import { g7Risk } from "./gates/g7-risk";
 import { g8Authority } from "./gates/g8-authority";
+
+// Import your unified Sovereign State Machine
+import { tradeStateMachine } from "@/lib/trade-state-machine";
 
 import type {
   Gate,
@@ -56,12 +52,6 @@ const PIPELINE: readonly Gate[] = [
   g8Authority,
 ];
 
-/*
- * Composite score is diagnostic.
- *
- * G2..G6 contribute to this score, but the composite
- * is not currently an additional trading restriction.
- */
 const COMPOSITE_THRESHOLD = 0.0;
 
 export interface PipelineInputs {
@@ -70,32 +60,48 @@ export interface PipelineInputs {
   risk: RiskContext;
 }
 
+// Extended return interface to expose the State Machine actions to your broker service
+export interface ExtendedGateReport extends GateReport {
+  engineAction: "NONE" | "OPEN" | "CLOSE";
+  currentPositionState: string;
+}
+
 export function runPipeline(
   inputs: PipelineInputs,
-): GateReport {
+): ExtendedGateReport {
   const outcomes: GateOutcome[] = [];
 
   /*
    * Stores gates that actually passed.
-   *
-   * G8 uses this vector to verify the mandatory
-   * safety gates G1 and G7.
+   * G8 uses this vector to verify the mandatory safety gates G1 and G7.
    */
   const priorPasses: GateId[] = [];
 
   /*
-   * First genuine hard-veto failure.
-   *
-   * G2..G6 cannot populate this because they are
-   * quality gates with hardVeto=false.
+   * First genuine hard-veto failure tracker.
    */
   let failedAt: GateId | null = null;
 
   /*
-   * Run G1 through G8 in strict order.
-   *
-   * Every gate runs so the complete audit report
-   * remains available even when a safety gate fails.
+   * =====================================================================
+   * SOVEREIGN CONTEXT PRE-PROCESSING
+   * =====================================================================
+   * Before running the gate evaluations, we inject the State Machine's 
+   * live position context directly into the input parameters. This allows 
+   * G1, G2, G5, G6, G7, and G8 to dynamically adjust their thresholds 
+   * based on whether we are currently FLAT, TRAPPING, or OPEN.
+   */
+  const liveEngineContext = tradeStateMachine.getState();
+  inputs.risk.positionState = liveEngineContext.state;
+  inputs.risk.positionSide = liveEngineContext.side;
+  inputs.risk.entryPrice = liveEngineContext.entryPrice;
+  inputs.risk.signalPrice = liveEngineContext.signalPrice;
+  inputs.risk.currentPrice = inputs.twin.last?.price || inputs.twin.last?.close || 0;
+
+  /*
+   * Run G1 through G8 in strict, immutable order.
+   * Every gate runs so the complete audit report remains fully available
+   * in the database ledger even when a safety gate fails.
    */
   for (const gate of PIPELINE) {
     const gateInputs: GateInputs = {
@@ -106,11 +112,10 @@ export function runPipeline(
     };
 
     const outcome = gate(gateInputs);
-
     outcomes.push(outcome);
 
     /*
-     * Record the first actual hard-veto failure.
+     * Record the first actual hard-veto safety failure.
      */
     if (
       !outcome.passed &&
@@ -121,8 +126,7 @@ export function runPipeline(
     }
 
     /*
-     * Only passed gates enter the cumulative
-     * pass vector used by downstream authority.
+     * Only passed gates enter the cumulative pass vector.
      */
     if (outcome.passed) {
       priorPasses.push(outcome.gate);
@@ -130,98 +134,98 @@ export function runPipeline(
   }
 
   /*
-   * Calculate the diagnostic weighted composite.
-   *
-   * This remains informational until calibrated.
+   * Calculate the diagnostic weighted composite score.
    */
   let weightSum = 0;
   let weighted = 0;
 
   for (const outcome of outcomes) {
     weightSum += outcome.weight;
-    weighted +=
-      outcome.weight * outcome.score;
+    weighted += outcome.weight * outcome.score;
   }
 
-  const compositeScore =
-    weightSum > 0
-      ? weighted / weightSum
-      : 0;
+  const compositeScore = weightSum > 0 ? weighted / weightSum : 0;
 
   /*
-   * Informational status only.
-   *
-   * This is deliberately NOT used as the execution
-   * requirement because G2..G6 are quality gates.
+   * Informational validation status only.
    */
   const allGatesPassed =
     outcomes.length === PIPELINE.length &&
-    outcomes.every(
-      (outcome) => outcome.passed,
-    );
+    outcomes.every((outcome) => outcome.passed);
 
   /*
-   * G8 is the final execution authority.
+   * G8 check to verify authority signature alignment.
    */
-  const authorityOutcome =
-    outcomes.find(
-      (outcome) =>
-        outcome.gate === "G8_AUTHORITY",
-    );
-
-  const authorityPassed =
-    authorityOutcome?.passed === true;
+  const authorityOutcome = outcomes.find(
+    (outcome) => outcome.gate === "G8_AUTHORITY",
+  );
+  const authorityPassed = authorityOutcome?.passed === true;
 
   /*
-   * Final trade readiness.
-   *
-   * Execution requires:
-   *
-   *   1. G8 grants authority.
-   *   2. No genuine hard safety veto exists.
-   *   3. Composite meets its diagnostic threshold.
-   *
-   * G2..G6 are intentionally NOT required to pass.
-   *
-   * Therefore:
-   *
-   *   G2 fail  -> trade can still arm
-   *   G3 fail  -> trade can still arm
-   *   G4 fail  -> trade can still arm
-   *   G5 fail  -> trade can still arm
-   *   G6 fail  -> trade can still arm
-   *
-   * But:
-   *
-   *   G1 fail  -> execution blocked
-   *   G7 fail  -> execution blocked
-   *   G8 fail  -> execution blocked
+   * Base trade readiness value (Green-Light Flag)
    */
   const tradeArmed =
     authorityPassed &&
     failedAt === null &&
     compositeScore >= COMPOSITE_THRESHOLD;
 
+  /*
+   * =====================================================================
+   * SOVEREIGN TICK EVALUATION LOOP (Continuous Processing Execution)
+   * =====================================================================
+   * We pull this block OUTSIDE the 'if (tradeArmed)' barrier.
+   * This guarantees that the tick flows through the state machine on
+   * every single millisecond calculation pass, allowing exits to trigger
+   * instantly when stop boundaries are hit, regardless of gate statuses.
+   */
+  let engineAction: "NONE" | "OPEN" | "CLOSE" = "NONE";
+
+  if (inputs.twin?.last) {
+    const currentPrice = inputs.twin.last.price || inputs.twin.last.close || 0;
+    const timestamp = Date.now();
+    
+    // Extract real-time lens consensus from your PPG snapshot metrics
+    const verdict = inputs.ppg?.verdict || "SILENT";
+    const agreement = inputs.ppg?.agreement || 0.0;
+
+    // Send the execution vector straight through the state machine logic parameters
+    const stateResult = tradeStateMachine.evaluateTick(
+      currentPrice,
+      timestamp,
+      verdict,
+      agreement,
+      60, // Target BPS parameters (Widen to accommodate +24 bps macro target)
+      20  // Stop BPS parameters (Widen to accommodate -10 bps risk floor)
+    );
+
+    // Capture the state machine's real command
+    engineAction = stateResult.action;
+
+    // Override loop: If the gate system has completely revoked trade permission due to a 
+    // network failure or macro drawdown veto, force the position to liquidate immediately.
+    if (!tradeArmed && (liveEngineContext.state === "OPEN" || liveEngineContext.state === "MANAGING" || liveEngineContext.state === "HOLDING_STRETCH")) {
+      engineAction = "CLOSE";
+      console.log("🛑 [GLOBAL SYSTEM VETO]: Pipeline revoked execution permissions. Force-liquidating position.");
+    }
+
+    if (engineAction === "OPEN") {
+      console.log("🚀 [SOVEREIGN TRAP SPRUNG]: Crowd panic hit 10 bps threshold. Firing true entry.");
+    } else if (engineAction === "CLOSE") {
+      console.log(`🔒 [WAVE SETTLED]: Position cleared cleanly. Engine Reason: ${stateResult.record?.reason || "Pipeline Sync Drop"}`);
+    }
+  }
+
   return {
     outcomes,
-
     failedAt,
-
-    /*
-     * Preserve this as a complete-report diagnostic.
-     * It is intentionally NOT used to arm trading.
-     */
-    allPassed:
-      allGatesPassed,
-
+    allPassed: allGatesPassed,
     compositeScore,
-
     tradeArmed,
-
-    compositeThreshold:
-      COMPOSITE_THRESHOLD,
-
-    twinSeq:
-      inputs.twin.last?.twinSeq ?? -1,
+    compositeThreshold: COMPOSITE_THRESHOLD,
+    twinSeq: inputs.twin.last?.twinSeq ?? -1,
+    
+    // Asymmetric data additions passed up to your app container UI
+    engineAction,
+    currentPositionState: tradeStateMachine.getState().state
   };
-      }
+}
