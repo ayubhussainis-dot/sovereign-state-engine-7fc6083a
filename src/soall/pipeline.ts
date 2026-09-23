@@ -170,16 +170,12 @@ class EmbeddedTradeStateMachine {
 
       if (currentPnLBps >= this.TRAILING_ACTIVATE_BPS && currentPnLBps < this.TIPPING_POINT_BPS) {
         const breakEvenPrice = entry * (1 + multiplier * (0.5 / 10000));
-        this.context.stopPrice = side === "long" 
-          ? Math.max(this.context.stopPrice, breakEvenPrice) 
-          : Math.min(this.context.stopPrice, breakEvenPrice);
+        this.context.stopPrice = side === "long" ? Math.max(this.context.stopPrice, breakEvenPrice) : Math.min(this.context.stopPrice, breakEvenPrice);
       }
 
       if (currentPnLBps >= this.TIPPING_POINT_BPS) {
         const tippingLockPrice = entry * (1 + multiplier * (this.TIPPING_POINT_BPS / 10000));
-        this.context.stopPrice = side === "long" 
-          ? Math.max(this.context.stopPrice, tippingLockPrice) 
-          : Math.min(this.context.stopPrice, tippingLockPrice);
+        this.context.stopPrice = side === "long" ? Math.max(this.context.stopPrice, tippingLockPrice) : Math.min(this.context.stopPrice, tippingLockPrice);
       }
 
       if (side === "long") {
@@ -308,3 +304,4 @@ export function runPipeline(
     const outcome = gate(gateInputs);
     outcomes.push(outcome);
 
+    if (!outcome.passed && outcome.hardVeto && failedAt === null) {
