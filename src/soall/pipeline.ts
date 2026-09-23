@@ -4,23 +4,33 @@
  * TEST STRATEGY CONFIGURATION
  * ----------------------------
  * Entry Mechanism:
- *   10-bps Delayed Entry Trap
+ *   0.001 entry threshold
  *
  * Risk Management:
- *   Strict symmetric -30.0 BPS maximum loss from fill
+ *   Strict symmetric -0.300 maximum loss from fill
  *
  * Target Execution:
- *   +30.0 BPS macro target from fill
+ *   +0.300 target from fill
  *
  * Authority:
  *   G8 may explicitly signal a strategic exit.
  *
  * Important:
+ *   There is NO 10-BPS delayed entry.
+ *   There is NO 1-BPS entry.
+ *   There is NO negative entry threshold.
  *   There is NO tipping-point ratchet.
  *   There is NO dip-lock.
- *   There is NO asymmetric -10 BPS floor.
- *   There is NO independent +24 BPS target.
+ *   There is NO asymmetric loss floor.
+ *   There is NO independent +0.240 target.
  *   There is NO independent 60/20 execution configuration.
+ *   There is NO inversion-based early exit.
+ *
+ * Numeric contract:
+ *
+ *   ENTRY  = +0.001
+ *   WIN    = +0.300 from actual fill
+ *   LOSS   = -0.300 from actual fill
  *
  * Contract:
  *   Deterministic · Pure · Replay Safe · Complete · Self-Contained
@@ -96,29 +106,33 @@ export interface TradeCycleRecord {
 // STRATEGIC TEST PARAMETERS
 // =====================================================================
 
-const TRAP_BUFFER_BPS = 10.0;
+/**
+ * AUTHORITATIVE ENTRY VALUE.
+ *
+ * Same numeric threshold for LONG and SHORT.
+ *
+ * The actual market price at which this threshold is reached
+ * becomes the actual fill / zero reference for the trade.
+ */
+const ENTRY_BPS = 0.001;
 
 /**
- * Authoritative test target.
+ * AUTHORITATIVE WIN VALUE.
  *
- * Long:
- *   entry +30 BPS
+ * Measured FROM ACTUAL FILL.
  *
- * Short:
- *   entry -30 BPS
+ * +0.300 = WIN
  */
-const TARGET_WIN_BPS = 30.0;
+const TARGET_WIN_BPS = 0.300;
 
 /**
- * Authoritative maximum loss.
+ * AUTHORITATIVE LOSS VALUE.
  *
- * Long:
- *   entry -30 BPS
+ * Measured FROM ACTUAL FILL.
  *
- * Short:
- *   entry +30 BPS
+ * -0.300 = LOSS
  */
-const MAX_LOSS_BPS = -30.0;
+const MAX_LOSS_BPS = -0.300;
 
 // =====================================================================
 // SOVEREIGN ALPHA ENGINE CLASS
@@ -160,48 +174,94 @@ class EmbeddedTradeStateMachine {
   }
 
   // -------------------------------------------------------------------
-  // PRICE CALCULATORS
+  // PRICE / PNL CALCULATORS
   // -------------------------------------------------------------------
 
+  /**
+   * Returns PnL in the SAME DECIMAL SCALE used by the application.
+   *
+   * IMPORTANT:
+   *
+   * There is NO *10000 conversion here.
+   *
+   * Example:
+   *
+   *   +0.300 = WIN
+   *   -0.300 = LOSS
+   *
+   * Long:
+   *   price rises = positive PnL
+   *
+   * Short:
+   *   price falls = positive PnL
+   */
   private calculatePnLBps(
     currentPrice: number,
     entryPrice: number,
     side: Side,
   ): number {
-    if (!entryPrice || !Number.isFinite(entryPrice)) {
+    if (
+      !entryPrice ||
+      !Number.isFinite(entryPrice)
+    ) {
       return 0;
     }
 
-    const multiplier = side === "long" ? 1 : -1;
+    const multiplier =
+      side === "long"
+        ? 1
+        : -1;
 
     return (
-      ((currentPrice - entryPrice) / entryPrice) *
-      multiplier *
-      10000
+      (
+        (currentPrice - entryPrice) /
+        entryPrice
+      ) *
+      multiplier
     );
   }
 
+  /**
+   * Calculates the +0.300 target FROM ACTUAL FILL.
+   */
   private calculateTargetPrice(
     entryPrice: number,
     side: Side,
   ): number {
-    const multiplier = side === "long" ? 1 : -1;
+    const multiplier =
+      side === "long"
+        ? 1
+        : -1;
 
     return (
       entryPrice *
-      (1 + multiplier * (TARGET_WIN_BPS / 10000))
+      (
+        1 +
+        multiplier *
+        TARGET_WIN_BPS
+      )
     );
   }
 
+  /**
+   * Calculates the -0.300 stop FROM ACTUAL FILL.
+   */
   private calculateStopPrice(
     entryPrice: number,
     side: Side,
   ): number {
-    const multiplier = side === "long" ? 1 : -1;
+    const multiplier =
+      side === "long"
+        ? 1
+        : -1;
 
     return (
       entryPrice *
-      (1 + multiplier * (MAX_LOSS_BPS / 10000))
+      (
+        1 +
+        multiplier *
+        MAX_LOSS_BPS
+      )
     );
   }
 
@@ -219,31 +279,39 @@ class EmbeddedTradeStateMachine {
     action: "CLOSE";
     record: TradeCycleRecord;
   } {
-    const side = this.context.side!;
+    const side =
+      this.context.side!;
 
-    const entry = this.context.entryPrice;
+    const entry =
+      this.context.entryPrice;
 
-    const currentPnLBps = this.calculatePnLBps(
-      currentPrice,
-      entry,
-      side,
-    );
+    const currentPnLBps =
+      this.calculatePnLBps(
+        currentPrice,
+        entry,
+        side,
+      );
 
-    this.context.state = "CLOSING";
+    this.context.state =
+      "CLOSING";
 
     const record: TradeCycleRecord = {
-      id: `cycle-${Date.now()}`,
+      id:
+        `cycle-${Date.now()}`,
 
       side,
 
       signalPrice:
         this.context.signalPrice,
 
-      entryPrice: entry,
+      entryPrice:
+        entry,
 
-      exitPrice: currentPrice,
+      exitPrice:
+        currentPrice,
 
-      pnlBps: currentPnLBps,
+      pnlBps:
+        currentPnLBps,
 
       reason,
 
@@ -253,38 +321,50 @@ class EmbeddedTradeStateMachine {
       closedAt:
         timestamp,
 
-      ALI3N: "SETTLED",
+      ALI3N:
+        "SETTLED",
     };
 
     this.ledger.push(record);
 
     this.context = {
-      state: "FLAT",
+      state:
+        "FLAT",
 
-      side: null,
+      side:
+        null,
 
-      signalPrice: 0,
+      signalPrice:
+        0,
 
-      entryPrice: 0,
+      entryPrice:
+        0,
 
-      size: 1.0,
+      size:
+        1.0,
 
-      targetPrice: 0,
+      targetPrice:
+        0,
 
-      stopPrice: 0,
+      stopPrice:
+        0,
 
-      openedAt: 0,
+      openedAt:
+        0,
 
       fusionSnapshot: {
         verdict,
         agreement,
       },
 
-      ALI3N: "ACTIVE",
+      ALI3N:
+        "ACTIVE",
     };
 
     return {
-      action: "CLOSE",
+      action:
+        "CLOSE",
+
       record,
     };
   }
@@ -298,65 +378,82 @@ class EmbeddedTradeStateMachine {
     timestamp: number,
     verdict: string,
     agreement: number,
-
-    /**
-     * Explicit G8 strategic exit.
-     *
-     * When supplied, the execution layer MUST settle
-     * the currently open position at the current market price.
-     */
     authorityExitReason?: string | null,
   ): {
-    action: "NONE" | "OPEN" | "CLOSE";
-    record?: TradeCycleRecord;
-  } {
-    const isBull = verdict === "LOCKED-BULL";
+    action:
+      | "NONE"
+      | "OPEN"
+      | "CLOSE";
 
-    const isBear = verdict === "LOCKED-BEAR";
+    record?:
+      TradeCycleRecord;
+  } {
+    const isBull =
+      verdict ===
+      "LOCKED-BULL";
+
+    const isBear =
+      verdict ===
+      "LOCKED-BEAR";
 
     // ================================================================
     // PHASE 1 — ARM
     // ================================================================
 
     if (
-      timestamp - this.lastVerdictChange >
+      timestamp -
+        this.lastVerdictChange >
       this.debounceWindowMs
     ) {
       if (
-        this.context.state === "FLAT" &&
+        this.context.state ===
+          "FLAT" &&
         (isBull || isBear) &&
         agreement > 0.75
       ) {
-        this.context.state = "ARMED";
+        this.context.state =
+          "ARMED";
 
-        this.lastVerdictChange = timestamp;
+        this.lastVerdictChange =
+          timestamp;
       }
     }
 
     // ================================================================
-    // PHASE 2 — ENTER TRAP
+    // PHASE 2 — CREATE SIGNAL
     // ================================================================
 
-    if (this.context.state === "ARMED") {
+    if (
+      this.context.state ===
+      "ARMED"
+    ) {
       const side: Side =
-        isBull ? "long" : "short";
+        isBull
+          ? "long"
+          : "short";
 
       this.context = {
         ...this.context,
 
-        state: "TRAPPING",
+        state:
+          "TRAPPING",
 
         side,
 
-        signalPrice: currentPrice,
+        signalPrice:
+          currentPrice,
 
-        entryPrice: 0,
+        entryPrice:
+          0,
 
-        targetPrice: 0,
+        targetPrice:
+          0,
 
-        stopPrice: 0,
+        stopPrice:
+          0,
 
-        openedAt: timestamp,
+        openedAt:
+          timestamp,
 
         fusionSnapshot: {
           verdict,
@@ -365,59 +462,103 @@ class EmbeddedTradeStateMachine {
       };
 
       return {
-        action: "NONE",
+        action:
+          "NONE",
       };
     }
 
     // ================================================================
-    // PHASE 3 — DELAYED ENTRY
+    // PHASE 3 — 0.001 ENTRY
     // ================================================================
 
-    if (this.context.state === "TRAPPING") {
-      const side = this.context.side!;
+    if (
+      this.context.state ===
+      "TRAPPING"
+    ) {
+      const side =
+        this.context.side!;
 
       const signal =
         this.context.signalPrice;
 
-      const multiplier =
-        side === "long" ? -1 : 1;
+      if (
+        !signal ||
+        !Number.isFinite(signal)
+      ) {
+        return {
+          action:
+            "NONE",
+        };
+      }
 
-      const currentDriftBps =
-        ((currentPrice - signal) / signal) *
-        multiplier *
-        10000;
+      /**
+       * ENTRY USES THE APPLICATION'S DECIMAL SCALE.
+       *
+       * Same ENTRY_BPS value for both LONG and SHORT.
+       *
+       * No *10000.
+       * No +1.
+       * No -1.
+       *
+       * The magnitude of movement from the signal must reach 0.001.
+       */
+      const movement =
+        Math.abs(
+          (
+            currentPrice -
+            signal
+          ) /
+          signal
+        );
 
       // --------------------------------------------------------------
-      // Opposite signal cancels trap
+      // Opposite signal cancels pending entry
       // --------------------------------------------------------------
 
       if (
-        (side === "long" && isBear) ||
-        (side === "short" && isBull)
+        (
+          side === "long" &&
+          isBear
+        ) ||
+        (
+          side === "short" &&
+          isBull
+        )
       ) {
-        this.context.state = "FLAT";
+        this.context.state =
+          "FLAT";
 
-        this.context.side = null;
+        this.context.side =
+          null;
 
         return {
-          action: "NONE",
+          action:
+            "NONE",
         };
       }
 
       // --------------------------------------------------------------
-      // 10-BPS delayed entry
+      // 0.001 ENTRY
       // --------------------------------------------------------------
 
       if (
-        currentDriftBps >=
-        TRAP_BUFFER_BPS
+        movement >=
+        ENTRY_BPS
       ) {
-        const entryPrice = currentPrice;
+        /**
+         * ACTUAL FILL.
+         *
+         * This price becomes the zero reference
+         * for all subsequent PnL calculations.
+         */
+        const entryPrice =
+          currentPrice;
 
         this.context = {
           ...this.context,
 
-          state: "OPEN",
+          state:
+            "OPEN",
 
           entryPrice,
 
@@ -433,16 +574,19 @@ class EmbeddedTradeStateMachine {
               side,
             ),
 
-          openedAt: timestamp,
+          openedAt:
+            timestamp,
         };
 
         return {
-          action: "OPEN",
+          action:
+            "OPEN",
         };
       }
 
       return {
-        action: "NONE",
+        action:
+          "NONE",
       };
     }
 
@@ -451,15 +595,23 @@ class EmbeddedTradeStateMachine {
     // ================================================================
 
     if (
-      this.context.state === "OPEN" ||
-      this.context.state === "MANAGING" ||
-      this.context.state === "HOLDING_STRETCH"
+      this.context.state ===
+        "OPEN" ||
+      this.context.state ===
+        "MANAGING" ||
+      this.context.state ===
+        "HOLDING_STRETCH"
     ) {
-      if (this.context.state === "OPEN") {
-        this.context.state = "MANAGING";
+      if (
+        this.context.state ===
+        "OPEN"
+      ) {
+        this.context.state =
+          "MANAGING";
       }
 
-      const side = this.context.side!;
+      const side =
+        this.context.side!;
 
       const entry =
         this.context.entryPrice;
@@ -472,10 +624,12 @@ class EmbeddedTradeStateMachine {
         );
 
       // ==============================================================
-      // G8 AUTHORITY EXIT — FIRST PRIORITY
+      // G8 AUTHORITY EXIT
       // ==============================================================
 
-      if (authorityExitReason) {
+      if (
+        authorityExitReason
+      ) {
         return this.settlePosition(
           currentPrice,
           timestamp,
@@ -486,7 +640,7 @@ class EmbeddedTradeStateMachine {
       }
 
       // ==============================================================
-      // +30 BPS TARGET
+      // +0.300 = WIN
       // ==============================================================
 
       if (
@@ -498,12 +652,12 @@ class EmbeddedTradeStateMachine {
           timestamp,
           verdict,
           agreement,
-          `TARGET_30BPS_SECURED (${currentPnLBps.toFixed(2)}bps)`,
+          `TARGET_0.300_SECURED (${currentPnLBps.toFixed(4)})`,
         );
       }
 
       // ==============================================================
-      // -30 BPS HARD LOSS FLOOR
+      // -0.300 = LOSS
       // ==============================================================
 
       if (
@@ -515,20 +669,24 @@ class EmbeddedTradeStateMachine {
           timestamp,
           verdict,
           agreement,
-          `MAX_LOSS_30BPS_REACHED (${currentPnLBps.toFixed(2)}bps)`,
+          `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
         );
       }
 
       // ==============================================================
       // DIRECT PRICE TARGET / STOP DEFENSE
       //
-      // These are mathematically identical to +30 / -30 BPS.
-      // They exist as an execution-layer defense in case the
-      // calculated PnL boundary and displayed market price differ
-      // by floating-point/rounding behavior.
+      // These correspond exactly to:
+      //
+      //   +0.300 WIN
+      //   -0.300 LOSS
+      //
+      // calculated from the actual fill.
       // ==============================================================
 
-      if (side === "long") {
+      if (
+        side === "long"
+      ) {
         if (
           currentPrice >=
           this.context.targetPrice
@@ -538,7 +696,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `TARGET_30BPS_SECURED (${currentPnLBps.toFixed(2)}bps)`,
+            `TARGET_0.300_SECURED (${currentPnLBps.toFixed(4)})`,
           );
         }
 
@@ -551,7 +709,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `MAX_LOSS_30BPS_REACHED (${currentPnLBps.toFixed(2)}bps)`,
+            `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
           );
         }
       } else {
@@ -564,7 +722,7 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `TARGET_30BPS_SECURED (${currentPnLBps.toFixed(2)}bps)`,
+            `TARGET_0.300_SECURED (${currentPnLBps.toFixed(4)})`,
           );
         }
 
@@ -577,69 +735,15 @@ class EmbeddedTradeStateMachine {
             timestamp,
             verdict,
             agreement,
-            `MAX_LOSS_30BPS_REACHED (${currentPnLBps.toFixed(2)}bps)`,
-          );
-        }
-      }
-
-      // ==============================================================
-      // INVERSION HANDLING
-      //
-      // This remains separate from the hard -30 BPS boundary.
-      // A profitable inversion can remain in HOLDING_STRETCH.
-      // A losing inversion above -30 BPS can exit.
-      // ==============================================================
-
-      let inversionReason:
-        | string
-        | null = null;
-
-      if (
-        side === "long" &&
-        isBear
-      ) {
-        inversionReason =
-          "GATE_INVERSION_BEAR";
-      }
-
-      if (
-        side === "short" &&
-        isBull
-      ) {
-        inversionReason =
-          "GATE_INVERSION_BULL";
-      }
-
-      if (inversionReason) {
-        if (
-          currentPnLBps > 0 &&
-          currentPnLBps < TARGET_WIN_BPS
-        ) {
-          this.context.state =
-            "HOLDING_STRETCH";
-
-          return {
-            action: "NONE",
-          };
-        }
-
-        if (
-          currentPnLBps <= 0 &&
-          currentPnLBps > MAX_LOSS_BPS
-        ) {
-          return this.settlePosition(
-            currentPrice,
-            timestamp,
-            verdict,
-            agreement,
-            `TRAP_INVERSION_RISK_EXIT (${currentPnLBps.toFixed(2)}bps)`,
+            `MAX_LOSS_0.300_REACHED (${currentPnLBps.toFixed(4)})`,
           );
         }
       }
     }
 
     return {
-      action: "NONE",
+      action:
+        "NONE",
     };
   }
 }
@@ -655,18 +759,20 @@ export const localPipelineStateMachine =
 // CORE PIPELINE
 // =====================================================================
 
-const PIPELINE: readonly Gate[] = [
-  g1Synchrony,
-  g2Structure,
-  g3Confluence,
-  g4Pattern,
-  g5Examination,
-  g6Confidence,
-  g7Risk,
-  g8Authority,
-];
+const PIPELINE:
+  readonly Gate[] = [
+    g1Synchrony,
+    g2Structure,
+    g3Confluence,
+    g4Pattern,
+    g5Examination,
+    g6Confidence,
+    g7Risk,
+    g8Authority,
+  ];
 
-const COMPOSITE_THRESHOLD = 0.0;
+const COMPOSITE_THRESHOLD =
+  0.0;
 
 export interface PipelineInputs {
   twin: TwinSnapshot;
@@ -681,7 +787,8 @@ export interface ExtendedGateReport
     | "OPEN"
     | "CLOSE";
 
-  currentPositionState: string;
+  currentPositionState:
+    string;
 }
 
 // =====================================================================
@@ -691,18 +798,23 @@ export interface ExtendedGateReport
 export function runPipeline(
   inputs: PipelineInputs,
 ): ExtendedGateReport {
-  const outcomes: GateOutcome[] = [];
+  const outcomes:
+    GateOutcome[] = [];
 
-  const priorPasses: GateId[] = [];
+  const priorPasses:
+    GateId[] = [];
 
-  let failedAt: GateId | null = null;
+  let failedAt:
+    GateId | null =
+    null;
 
   // -------------------------------------------------------------------
   // CURRENT ENGINE STATE BEFORE THIS TICK
   // -------------------------------------------------------------------
 
   const liveEngineContext =
-    localPipelineStateMachine.getState();
+    localPipelineStateMachine
+      .getState();
 
   inputs.risk.positionState =
     liveEngineContext.state;
@@ -725,32 +837,45 @@ export function runPipeline(
   // G1 → G8
   // -------------------------------------------------------------------
 
-  for (const gate of PIPELINE) {
-    const gateInputs: GateInputs = {
-      twin: inputs.twin,
+  for (
+    const gate of PIPELINE
+  ) {
+    const gateInputs:
+      GateInputs = {
+        twin:
+          inputs.twin,
 
-      ppg: inputs.ppg,
+        ppg:
+          inputs.ppg,
 
-      risk: inputs.risk,
+        risk:
+          inputs.risk,
 
-      priorPasses:
-        priorPasses.slice(),
-    };
+        priorPasses:
+          priorPasses.slice(),
+      };
 
     const outcome =
-      gate(gateInputs);
+      gate(
+        gateInputs,
+      );
 
-    outcomes.push(outcome);
+    outcomes.push(
+      outcome,
+    );
 
     if (
       !outcome.passed &&
       outcome.hardVeto &&
       failedAt === null
     ) {
-      failedAt = outcome.gate;
+      failedAt =
+        outcome.gate;
     }
 
-    if (outcome.passed) {
+    if (
+      outcome.passed
+    ) {
       priorPasses.push(
         outcome.gate,
       );
@@ -761,11 +886,15 @@ export function runPipeline(
   // COMPOSITE
   // -------------------------------------------------------------------
 
-  let weightSum = 0;
+  let weightSum =
+    0;
 
-  let weighted = 0;
+  let weighted =
+    0;
 
-  for (const outcome of outcomes) {
+  for (
+    const outcome of outcomes
+  ) {
     weightSum +=
       outcome.weight;
 
@@ -776,7 +905,8 @@ export function runPipeline(
 
   const compositeScore =
     weightSum > 0
-      ? weighted / weightSum
+      ? weighted /
+        weightSum
       : 0;
 
   const allGatesPassed =
@@ -808,28 +938,24 @@ export function runPipeline(
   // EXTRACT G8 STRATEGIC EXIT SIGNAL
   // -------------------------------------------------------------------
 
-  /**
-   * G8 exposes its strategic decision through evidence.exitTriggered.
-   *
-   * The execution engine now explicitly consumes this signal.
-   *
-   * This is the critical connection that was missing previously.
-   */
-
   const authorityEvidence =
     authorityOutcome?.evidence as
       | {
-          exitTriggered?: boolean;
-          exitReason?: string;
+          exitTriggered?:
+            boolean;
+          exitReason?:
+            string;
         }
       | undefined;
 
   const authorityExitTriggered =
-    authorityEvidence?.exitTriggered ===
+    authorityEvidence
+      ?.exitTriggered ===
     true;
 
   const authorityExitReason =
-    authorityEvidence?.exitReason ||
+    authorityEvidence
+      ?.exitReason ||
     "G8_EXIT";
 
   // -------------------------------------------------------------------
@@ -842,7 +968,9 @@ export function runPipeline(
     | "CLOSE" =
     "NONE";
 
-  if (inputs.twin?.last) {
+  if (
+    inputs.twin?.last
+  ) {
     const currentPrice =
       inputs.twin.last.price ||
       inputs.twin.last.close ||
@@ -860,7 +988,7 @@ export function runPipeline(
       0.0;
 
     // ---------------------------------------------------------------
-    // Only pass the G8 exit signal when a position was already live.
+    // Only pass G8 exit when a position was already live.
     // ---------------------------------------------------------------
 
     const positionWasLive =
@@ -878,13 +1006,14 @@ export function runPipeline(
         : null;
 
     const stateResult =
-      localPipelineStateMachine.evaluateTick(
-        currentPrice,
-        timestamp,
-        verdict,
-        agreement,
-        strategicExit,
-      );
+      localPipelineStateMachine
+        .evaluateTick(
+          currentPrice,
+          timestamp,
+          verdict,
+          agreement,
+          strategicExit,
+        );
 
     engineAction =
       stateResult.action;
@@ -892,23 +1021,18 @@ export function runPipeline(
     // ---------------------------------------------------------------
     // HARD GATE VETO
     //
-    // If a live position is vetoed by a hard safety gate, force
-    // settlement through the same state-machine path.
-    //
-    // This replaces the previous stale-state assignment:
-    //     engineAction = "CLOSE"
-    //
-    // which only changed the reported action without actually
-    // settling the ledger position.
+    // A live position may still be settled by a hard gate veto.
     // ---------------------------------------------------------------
 
     if (
-      engineAction === "NONE" &&
+      engineAction ===
+        "NONE" &&
       !tradeArmed &&
       positionWasLive
     ) {
       const currentState =
-        localPipelineStateMachine.getState();
+        localPipelineStateMachine
+          .getState();
 
       if (
         currentState.state ===
@@ -919,13 +1043,14 @@ export function runPipeline(
           "HOLDING_STRETCH"
       ) {
         const forcedResult =
-          localPipelineStateMachine.evaluateTick(
-            currentPrice,
-            timestamp,
-            verdict,
-            agreement,
-            "HARD_GATE_VETO",
-          );
+          localPipelineStateMachine
+            .evaluateTick(
+              currentPrice,
+              timestamp,
+              verdict,
+              agreement,
+              "HARD_GATE_VETO",
+            );
 
         engineAction =
           forcedResult.action;
@@ -938,7 +1063,8 @@ export function runPipeline(
   // -------------------------------------------------------------------
 
   const finalEngineContext =
-    localPipelineStateMachine.getState();
+    localPipelineStateMachine
+      .getState();
 
   return {
     outcomes,
@@ -964,4 +1090,4 @@ export function runPipeline(
     currentPositionState:
       finalEngineContext.state,
   };
-    }
+      }
