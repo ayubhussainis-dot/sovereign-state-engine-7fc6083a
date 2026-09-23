@@ -34,9 +34,9 @@ export interface PaperStats {
 }
 
 export interface PaperBrokerConfig {
-  notionalUsdt: number;
-  stopFrac: number;
-  targetFrac: number;
+  fixedQty: number;   // Replaced dynamic notional with strict deterministic sizing
+  stopBps: number;    // Integer BPS limit
+  targetBps: number;  // Integer BPS limit
 }
 
 export interface OpenSignal {
@@ -68,9 +68,9 @@ export class PaperBroker {
 
   constructor(cfg?: Partial<PaperBrokerConfig>) {
     this.cfg = {
-      notionalUsdt: 10,
-      stopFrac: 0.0020,
-      targetFrac: 0.0040,
+      fixedQty: 0.001, // Locked at 0.001 base size per your requirement
+      stopBps: 30,     // Locked at 30 BPS
+      targetBps: 30,   // Locked at 30 BPS
       ...cfg,
     };
   }
@@ -90,21 +90,26 @@ export class PaperBroker {
       return null;
     }
 
-    const qty = this.cfg.notionalUsdt / signal.price;
+    // Force strict 0.001 execution size
+    const qty = this.cfg.fixedQty;
 
     if (!Number.isFinite(qty) || qty <= 0) {
       return null;
     }
 
+    // Mathematical conversion: 30 BPS / 10000 = 0.003
+    const stopFrac = this.cfg.stopBps / 10000;
+    const targetFrac = this.cfg.targetBps / 10000;
+
     const stop =
       signal.side === "long"
-        ? signal.price * (1 - this.cfg.stopFrac)
-        : signal.price * (1 + this.cfg.stopFrac);
+        ? signal.price * (1 - stopFrac)
+        : signal.price * (1 + stopFrac);
 
     const target =
       signal.side === "long"
-        ? signal.price * (1 + this.cfg.targetFrac)
-        : signal.price * (1 - this.cfg.targetFrac);
+        ? signal.price * (1 + targetFrac)
+        : signal.price * (1 - targetFrac);
 
     const position: PaperPosition = {
       id: this.nextId++,
@@ -176,7 +181,7 @@ export class PaperBroker {
       entry: position.entry,
       exit,
       qty: position.qty,
-      pnl: gross,
+      pnl: gross, // This will now perfectly output ±0.1750 on a ~$58k BTC price
       reason,
       openedAt: position.openedAt,
       closedAt: ts,
@@ -225,4 +230,5 @@ export class PaperBroker {
     this.losses = 0;
     this.nextId = 1;
   }
-           }
+}
+
