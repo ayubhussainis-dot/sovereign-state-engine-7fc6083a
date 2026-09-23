@@ -26,8 +26,8 @@ import { g6Confidence } from "./gates/g6-confidence";
 import { g7Risk } from "./gates/g7-risk";
 import { g8Authority } from "./gates/g8-authority";
 
-// Import your unified Sovereign State Machine
-import { tradeStateMachine } from "@/lib/trade-state-machine";
+// FIXED: Converted absolute path alias configuration to a concrete relative module lookup
+import { tradeStateMachine } from "../lib/trade-state-machine";
 
 import type {
   Gate,
