@@ -67,6 +67,7 @@ export interface TradeCycleRecord {
 const ENTRY_BPS = 0.0001;
 const TARGET_WIN_BPS = 0.0030;
 const MAX_LOSS_BPS = -0.0030;
+const LOCKOUT_DISPLACEMENT_BPS = 0.0025; // 25 BPS continuous move required after a loss
 
 // =====================================================================
 // STATEFUL LOCAL PROCESSING ENGINE
@@ -89,12 +90,34 @@ class EmbeddedTradeStateMachine {
   private lastVerdictChange = 0;
   private readonly debounceWindowMs = 2000;
 
+  // --- SYMBOL LOCKOUT TRACKING FOR LOSSES ---
+  private symbolLockouts: Record<string, { exitPrice: number; side: Side }> = {};
+
   getState(): PositionContext {
     return { ...this.context };
   }
 
   getLedger(): readonly TradeCycleRecord[] {
     return this.ledger;
+  }
+
+  isSymbolLockedOut(symbol: string, currentPrice: number): boolean {
+    const lockout = this.symbolLockouts[symbol];
+    if (!lockout) return false;
+
+    const multiplier = lockout.side === "long" ? 1 : -1;
+    const displacementBps = ((currentPrice - lockout.exitPrice) / lockout.exitPrice) * multiplier;
+
+    if (Math.abs((currentPrice - lockout.exitPrice) / lockout.exitPrice) >= LOCKOUT_DISPLACEMENT_BPS) {
+      delete this.symbolLockouts[symbol]; // Clear lockout once 25 BPS continuous move is reached
+      return false;
+    }
+
+    return true;
+  }
+
+  private registerLossLockout(symbol: string, exitPrice: number, side: Side) {
+    this.symbolLockouts[symbol] = { exitPrice, side };
   }
 
   private getDirectionMultiplier(side: Side): number {
@@ -144,6 +167,7 @@ class EmbeddedTradeStateMachine {
     verdict: string,
     agreement: number,
     reason: string,
+    symbol: string = "BTCUSDT",
   ): { action: "CLOSE"; record: TradeCycleRecord } {
     const side = this.context.side!;
     const entry = this.context.entryPrice;
@@ -165,6 +189,12 @@ class EmbeddedTradeStateMachine {
     };
 
     this.ledger.push(record);
+
+    // If position ended in loss, lock out symbol until 25 BPS continuous move
+    if (pnl < 0) {
+      this.registerLossLockout(symbol, currentPrice, side);
+    }
+
     this.resetToFlat(verdict, agreement);
 
     return { action: "CLOSE", record };
@@ -176,6 +206,7 @@ class EmbeddedTradeStateMachine {
     verdict: string,
     agreement: number,
     authorityExitReason?: string | null,
+    symbol: string = "BTCUSDT",
   ): { action: "NONE" | "OPEN" | "CLOSE"; record?: TradeCycleRecord } {
     const isBull = verdict === "LOCKED-BULL";
     const isBear = verdict === "LOCKED-BEAR";
@@ -245,6 +276,7 @@ class EmbeddedTradeStateMachine {
           verdict,
           agreement,
           `G8_AUTHORITY_EXIT · ${authorityExitReason}`,
+          symbol,
         );
       }
 
@@ -255,6 +287,7 @@ class EmbeddedTradeStateMachine {
           verdict,
           agreement,
           `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
+          symbol,
         );
       }
 
@@ -265,24 +298,25 @@ class EmbeddedTradeStateMachine {
           verdict,
           agreement,
           `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`,
+          symbol,
         );
       }
 
       if (side === "long") {
         if (currentPrice >= this.context.targetPrice) {
-          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`);
+          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`, symbol);
         }
         if (currentPrice <= this.context.stopPrice) {
-          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`);
+          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`, symbol);
         }
       }
 
       if (side === "short") {
         if (currentPrice <= this.context.targetPrice) {
-          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`);
+          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `TARGET_30BPS_SECURED (${(currentPnLBps * 10000).toFixed(2)} bps)`, symbol);
         }
         if (currentPrice >= this.context.stopPrice) {
-          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`);
+          return this.settlePosition(currentPrice, timestamp, verdict, agreement, `MAX_LOSS_30BPS_REACHED (${(currentPnLBps * 10000).toFixed(2)} bps)`, symbol);
         }
       }
     }
@@ -329,7 +363,6 @@ export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
   let failedAt: GateId | null = null;
   const liveEngineContext = localPipelineStateMachine.getState();
 
-  // Safely inject context properties without type errors
   inputs.risk.positionState = liveEngineContext.state;
   inputs.risk.positionSide = liveEngineContext.side;
   inputs.risk.entryPrice = liveEngineContext.entryPrice;
@@ -376,8 +409,14 @@ export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
     const timestamp = Date.now();
     const agreement = inputs.ppg?.agreement || 0;
     let verdict = inputs.ppg?.verdict || "SILENT";
+    const symbol = inputs.twin.symbol || "BTCUSDT";
 
-    // --- AGREEMENT SHIELD FILTER (Elevated to 0.82 to block choppy losses) ---
+    // --- 25 BPS LOSS LOCKOUT CHECK ---
+    if (liveEngineContext.state === "FLAT" && localPipelineStateMachine.isSymbolLockedOut(symbol, currentPrice)) {
+      verdict = "SILENT"; // Forces verdict silent to prevent immediate re-entry churn
+    }
+
+    // --- AGREEMENT SHIELD FILTER ---
     if (liveEngineContext.state === "FLAT" && agreement < 0.82) {
       verdict = "SILENT";
     }
@@ -391,6 +430,7 @@ export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
       verdict,
       agreement,
       strategicExit,
+      symbol,
     );
     engineAction = stateResult.action;
 
@@ -403,6 +443,7 @@ export function runPipeline(inputs: PipelineInputs): ExtendedGateReport {
           verdict,
           agreement,
           "HARD_GATE_VETO",
+          symbol,
         );
         engineAction = forcedResult.action;
       }
