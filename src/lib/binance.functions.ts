@@ -8,8 +8,8 @@ export async function getFuturesTelemetry(symbol = "BTCUSDT") {
 }
 
 export async function executeDirectOrder(side: "BUY" | "SELL", quantity: number, symbol = "BTCUSDT") {
-  const apiKey = process.env["BINANCE_TESTNET_API_KEY"];
-  const apiSecret = process.env["BINANCE_TESTNET_API_SECRET"];
+  const apiKey = process.env["BINANCE_DEMO_API_KEY"];
+  const apiSecret = process.env["BINANCE_DEMO_API_SECRET"];
   if (!apiKey || !apiSecret) {
     throw new Error("Binance credentials not configured for direct order");
   }
@@ -32,8 +32,8 @@ export async function executeDirectOrder(side: "BUY" | "SELL", quantity: number,
 }
 
 export async function getActivePosition(symbol = "BTCUSDT") {
-  const apiKey = process.env["BINANCE_TESTNET_API_KEY"];
-  const apiSecret = process.env["BINANCE_TESTNET_API_SECRET"];
+  const apiKey = process.env["BINANCE_DEMO_API_KEY"];
+  const apiSecret = process.env["BINANCE_DEMO_API_SECRET"];
   if (!apiKey || !apiSecret) {
     return { hasPosition: false, positionAmt: 0, entryPrice: 0, unRealizedProfit: 0, leverage: 1 };
   }
